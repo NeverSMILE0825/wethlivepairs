@@ -1,7 +1,8 @@
 "use client"
 
-import { Component, useMemo, useState, type ReactNode } from "react"
-import { ACTIVITY_LABEL, CONDITION_LABEL, formatCompact, formatDelta, formatInZone, heatmap, hourSpanLabel, hourTotals, rankHourTotals, readConditionHistory, type ActivityBucket, type ActivityLevel, type ConditionPoint, type ScoreResult, type WindowStat } from "@/lib/activity/pulse"
+import { Component, useEffect, useMemo, useState, type ReactNode } from "react"
+import { pointsInRange, type ConditionPoint as HistoryPoint } from "@/lib/activity/market-history"
+import { ACTIVITY_LABEL, CONDITION_LABEL, formatCompact, formatDelta, formatInZone, heatmap, hourSpanLabel, hourTotals, rankHourTotals, type ActivityBucket, type ActivityLevel, type ScoreResult, type WindowStat } from "@/lib/activity/pulse"
 import { formatChange } from "@/lib/market/format"
 import { resolveZone } from "@/lib/types"
 
@@ -189,7 +190,6 @@ export function MarketPulse({
   zones,
   pairTimes,
   now,
-  recordedHour,
   typicalPairs,
   typicalBurns,
   survival,
@@ -213,7 +213,6 @@ export function MarketPulse({
   zones: readonly { id: string; label: string }[]
   pairTimes: readonly number[]
   now: number
-  recordedHour: number
   typicalPairs: number | null
   typicalBurns: number | null
   survival: { m15: Survival; m30: Survival; h1: Survival; h3: Survival }
@@ -232,15 +231,6 @@ export function MarketPulse({
       return null
     }
   }, [open, pairTimes, now, resolved])
-  const pairCount = pairs?.current ?? 0
-  const burnCount = burns?.current ?? 0
-  const recorded = useMemo(() => {
-    if (!open) return []
-    const stored = readConditionHistory().filter((row) => row.hour !== recordedHour && row.hour >= recordedHour - 168)
-    stored.push({ hour: recordedHour, score: score?.score ?? 0, pairs: pairCount, burns: burnCount, tx, gas })
-    stored.sort((a, b) => a.hour - b.hour)
-    return stored
-  }, [open, recordedHour, score, pairCount, burnCount, tx, gas])
   let maxCell = 1
   for (const row of calendar?.cells ?? []) for (const value of row.hours) if (value > maxCell) maxCell = value
   return (
@@ -262,7 +252,8 @@ export function MarketPulse({
         </button>
       </div>
       {open ? (
-        <div className="mt-2 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_minmax(14rem,1fr)] lg:items-start">
+        <div className="mt-2 flex flex-col gap-3">
+          <div className="grid gap-3 lg:grid-cols-2 lg:items-start">
           <div className="text-[11px] leading-5 text-muted-foreground">
             <p className="text-foreground">{score?.read ?? ""}</p>
             <p>This score describes observed launch activity. It is not a prediction and not a chance of a successful launch.</p>
@@ -277,13 +268,15 @@ export function MarketPulse({
             ) : <p>Recent launch multiples need two observed prices. None are indexed for the last 6 hours yet.</p>}
             <p>Historically active hours, last 7 days, pair launches: {calendar == null || calendar.active.length === 0 ? "not enough history" : calendar.active.map((item, index) => `#${index + 1} ${item.label} (${item.total})`).join(", ")}. These are the busiest observed hours, not a recommended launch time.</p>
             <p>Continued prices, pairs launched in the last 6h that are old enough: {survivalText("15m", survival.m15)}, {survivalText("30m", survival.m30)}, {survivalText("1h", survival.h1)}, {survivalText("3h", survival.h3)}. A later indexed price counts as continued activity.</p>
-            <ConditionChart points={recorded} />
             <label className="mt-1 flex items-center gap-2">Display timezone
               <select value={zone} onChange={(event) => onZone(event.target.value)} className="rounded bg-muted px-1 py-0.5 text-foreground">
                 {zones.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
               </select>
             </label>
           </div>
+          <MarketHistoryChart />
+          </div>
+          <div className="grid gap-3 lg:grid-cols-[auto_minmax(14rem,1fr)] lg:items-start">
           <div>
             <p className="text-[10px] tracking-wide text-muted-foreground uppercase">7-day pair heatmap · 12 AM through 11 PM</p>
             <div className="mt-1 overflow-x-auto">
@@ -302,6 +295,7 @@ export function MarketPulse({
             </div>
           </div>
           <LaunchHourChart totals={calendar?.hours ?? []} />
+          </div>
         </div>
       ) : null}
     </section>
@@ -356,29 +350,65 @@ function LaunchHourChart({ totals }: { totals: readonly number[] }) {
   )
 }
 
-function ConditionChart({ points }: { points: readonly ConditionPoint[] }) {
-  if (points.length < 2) return <p className="mt-1">The score chart fills in as this browser records each hour. Hours before that stay blank.</p>
-  const width = 280
-  const height = 64
-  let min = points[0]?.score ?? 0
-  let max = min
-  for (const point of points) {
-    if (point.score < min) min = point.score
-    if (point.score > max) max = point.score
+const HISTORY_RANGES = [
+  { id: "6h", label: "6H", ms: 6 * 60 * 60 * 1000 },
+  { id: "24h", label: "24H", ms: 24 * 60 * 60 * 1000 },
+  { id: "3d", label: "3D", ms: 3 * 24 * 60 * 60 * 1000 },
+  { id: "7d", label: "7D", ms: 7 * 24 * 60 * 60 * 1000 },
+] as const
+
+function MarketHistoryChart() {
+  const [points, setPoints] = useState<HistoryPoint[] | null>(null)
+  const [range, setRange] = useState<(typeof HISTORY_RANGES)[number]["id"]>("24h")
+  const [hover, setHover] = useState<number | null>(null)
+  useEffect(() => {
+    let cancel = false
+    fetch("/data/market-conditions.json")
+      .then((response) => response.ok ? response.json() : { points: [] })
+      .then((body: { points?: HistoryPoint[] }) => { if (!cancel) setPoints(Array.isArray(body.points) ? body.points : []) })
+      .catch(() => { if (!cancel) setPoints([]) })
+    return () => { cancel = true }
+  }, [])
+  const span = HISTORY_RANGES.find((item) => item.id === range) ?? HISTORY_RANGES[1]
+  const shown = points == null ? [] : pointsInRange(points, Date.now(), span.ms)
+  const width = 360
+  const height = 140
+  let min = 0
+  let max = 100
+  if (shown.length > 0) {
+    min = shown[0].score
+    max = shown[0].score
+    for (const point of shown) {
+      if (point.score < min) min = point.score
+      if (point.score > max) max = point.score
+    }
   }
-  const span = Math.max(1, max - min)
-  const path = points.map((point, index) => {
-    const x = (index / (points.length - 1)) * (width - 8) + 4
-    const y = height - 8 - ((point.score - min) / span) * (height - 16)
+  const scale = Math.max(1, max - min)
+  const path = shown.length < 2 ? "" : shown.map((point, index) => {
+    const x = (index / (shown.length - 1)) * (width - 16) + 8
+    const y = 16 + (1 - (point.score - min) / scale) * (height - 36)
     return `${index === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`
   }).join(" ")
-  const last = points[points.length - 1]
+  const index = hover ?? shown.length - 1
+  const current = shown[index]
   return (
-    <div className="mt-1">
-      <p className="text-[10px] tracking-wide uppercase">Launch environment, recorded on this browser · last {last.score}</p>
-      <svg viewBox={`0 0 ${width} ${height}`} className="mt-1 h-16 w-full text-sky-400" role="img" aria-label="Launch environment score recorded on this browser">
-        <path d={path} fill="none" stroke="currentColor" strokeWidth="1.5" />
-      </svg>
+    <div>
+      <p className="text-[10px] tracking-wide text-muted-foreground uppercase">Market conditions history</p>
+      {points == null ? <p className="mt-2 text-[11px] text-muted-foreground">Reading published history.</p> : shown.length < 2 ? <p className="mt-2 text-[11px] text-muted-foreground">History is written when the site publishes. This browser does not keep its own copy.</p> : (
+        <svg viewBox={`0 0 ${width} ${height}`} className="mt-1 h-36 w-full text-sky-400" role="img" aria-label="Published market condition score" onMouseLeave={() => setHover(null)} onMouseMove={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect()
+          const x = ((event.clientX - rect.left) / rect.width) * width
+          setHover(Math.max(0, Math.min(shown.length - 1, Math.round(((x - 8) / (width - 16)) * (shown.length - 1)))))
+        }}>
+          <path d={path} fill="none" stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+      )}
+      <div className="mt-1 flex flex-wrap gap-1">
+        {HISTORY_RANGES.map((item) => (
+          <button key={item.id} type="button" aria-pressed={range === item.id} onClick={() => setRange(item.id)} className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${range === item.id ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>{item.label}</button>
+        ))}
+      </div>
+      {current ? <p className="mt-1 text-[10px] leading-4 text-muted-foreground tabular-nums">{new Date(current.at).toLocaleString()} · Score {current.score} · Pairs {current.pairs} · LP burns {current.burns} · LP locks {current.locks}{current.gas == null ? "" : ` · Gas ${current.gas} gwei`}{current.eth1h == null ? "" : ` · ETH 1H ${current.eth1h}%`}</p> : null}
     </div>
   )
 }

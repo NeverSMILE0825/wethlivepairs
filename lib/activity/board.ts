@@ -4,7 +4,7 @@ export const BOARD_COLUMNS = [
   { id: "trends", label: "Trends", detail: "24h" },
   { id: "pumpers", label: "Top Pumpers", detail: "Ranked" },
   { id: "pairs", label: "Pairs", detail: "Live" },
-  { id: "burns", label: "LP Burns", detail: "Live" },
+  { id: "burns", label: "Liquidity Security", detail: "Live" },
 ] as const
 
 export type BoardColumnId = (typeof BOARD_COLUMNS)[number]["id"]

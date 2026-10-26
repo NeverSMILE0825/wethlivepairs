@@ -442,8 +442,8 @@ export type ScoreInput = {
   burns1h: number
   burnsPrevious: number
   burnsBaseline: number | null
-  tx1h: number
-  txPrevious: number
+  tx1h: number | null
+  txPrevious: number | null
   txBaseline: number | null
   netWeth: number | null
   medianMultiple: number | null
@@ -505,7 +505,7 @@ export function launchScore(input: ScoreInput): ScoreResult {
   const raw: Record<string, number | null> = {
     pairs: paceScore(input.pairs1h, input.pairsPrevious, input.pairsBaseline),
     burns: paceScore(input.burns1h, input.burnsPrevious, input.burnsBaseline),
-    tx: paceScore(input.tx1h, input.txPrevious, input.txBaseline),
+    tx: input.tx1h == null || input.txPrevious == null ? null : paceScore(input.tx1h, input.txPrevious, input.txBaseline),
     weth,
     momentum,
     gas: gas?.score ?? null,

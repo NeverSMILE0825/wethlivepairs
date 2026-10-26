@@ -7,6 +7,7 @@ import { useLpMonitor } from "@/components/lp/monitor-context"
 import { eventsOf } from "@/lib/lp/monitor"
 import { HistoryPanel } from "@/components/progress/history-panel"
 import { PageFrame } from "@/components/trends/widgets"
+import { SOURCE_STATUS } from "@/lib/features/registry"
 
 type Health = {
   permission: string
@@ -64,10 +65,19 @@ export default function SystemPage() {
         <Row label="Secure origin" value={health?.secure ?? "Checking"} />
         <Row label="Published scan" value={error ?? "Online"} />
       </dl>
+      <div className="grid gap-3 text-sm sm:grid-cols-2">
+        {SOURCE_STATUS.map((source) => (
+          <div key={source.id} className="rounded-lg bg-card px-3 py-2 ring-1 ring-foreground/10">
+            <p className="text-xs text-muted-foreground">{source.name}</p>
+            <p>{source.status === "configured" ? "Configured" : "Not configured"}</p>
+            <p className="text-xs text-muted-foreground">{source.note}</p>
+          </div>
+        ))}
+      </div>
       <div className="max-w-3xl text-sm leading-6 text-muted-foreground">
         <p>Pair counts use each pair&apos;s creation time. The DEXTools live listing returns about six hours. Uniswap V2, Uniswap V3, Uniswap V4, and SushiSwap are read from Ethereum through the newest settled block, so 6 hours, 12 hours, and 24 hours are not limited to that listing. LP burn counts use the burn time, and a live card for a burn already stored is the same burn. The live LP checkpoint is separate, and a failed RPC call does not move it. Backfill burns are stored and do not send a new-burn notification.</p>
         <p className="mt-2">The first live scan looks back 300 blocks, not 24 hours. Later scans continue from the saved block and replay 12 blocks so a short reorg can be deduplicated. Historical backfill keeps its own cursor. A failed RPC call leaves that cursor where it was, and the next publish resumes. Backfill does not move the live LP checkpoint.</p>
-        <p className="mt-2">While this site is open, the browser subscribes to Ethereum logs. A transfer into the dead address, or into the zero address from a holder, is an LP burn. A transfer from the pair contract to the zero address is a Uniswap liquidity removal and is not alerted. The 1000-wei mint to zero is protocol minimum liquidity and is not alerted. A transfer to a locker is not a burn, because locker addresses are not in the burn list. The published scan is reconciliation. It starts on pairs already stored, and it does not wait for DEXTools market details. There is no server-side WebSocket, so chain-to-notification latency is not measured here. A dropped socket shows Polling, not Realtime.</p>
+        <p className="mt-2">While this site is open, the browser subscribes to Ethereum logs. A transfer into the dead address, or into the zero address from a holder, is an LP burn. A transfer from the pair contract to the zero address is a Uniswap liquidity removal and is not alerted. The 1000-wei mint to zero is protocol minimum liquidity and is not alerted. A transfer into a verified locker is recorded as a lock on a separate subscription. It is not counted as a burn and it does not send a burn notification. The published scan is reconciliation. It starts on pairs already stored, and it does not wait for DEXTools market details. There is no server-side WebSocket, so chain-to-notification latency is not measured here. A dropped socket shows Polling, not Realtime.</p>
         <p className="mt-2">Chrome notifications work while this site is open, including a background tab, through the service worker. Web Push after the browser closes the site needs a push server, which GitHub Pages does not provide.</p>
       </div>
     </PageFrame>

@@ -26,7 +26,7 @@ export const CONCEPTS: Concept[] = [
   { id: "ai", label: "AI", group: "technology", aliases: ["artificial intelligence", "ai"], ticker: ["AI"], generic: true },
   { id: "agi", label: "AGI", group: "technology", aliases: ["artificial general intelligence", "agi"], ticker: ["AGI"] },
   { id: "superintelligence", label: "Superintelligence", group: "technology", aliases: ["superintelligence", "super intelligence", "superintelligent", "super intelligent", "super intel"], ticker: ["SI"] },
-  { id: "robot", label: "Robots", group: "technology", aliases: ["robotics", "robot", "robots", "optimus"], ticker: ["ROBOT", "OPTIMUS"] },
+  { id: "robot", label: "Robots", group: "technology", aliases: ["robotics", "robot", "robots", "optimus", "optimeme", "robotaxi", "tesla bot", "tesla robot"], ticker: ["ROBOT", "OPTIMUS"] },
   { id: "spacex", label: "SpaceX", group: "company", aliases: ["spacex", "space x", "starship"], ticker: ["SPACEX", "STARSHIP"] },
   { id: "tesla", label: "Tesla", group: "company", aliases: ["tesla"], ticker: ["TESLA"] },
   { id: "xai", label: "xAI", group: "company", aliases: ["xai", "x ai"], ticker: ["XAI"] },

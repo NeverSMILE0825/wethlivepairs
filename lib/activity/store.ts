@@ -138,6 +138,26 @@ export function pairActivity(record: PairRecord, live: boolean): ActivityInput {
   }
 }
 
+export function lockActivity(input: { id: string; at: string; pair: string; token: string | null; exchange: string | null; symbol: string; name: string; detail: string; href: string; live: boolean }): ActivityInput {
+  const token = text(input.token).toLowerCase()
+  return {
+    activityId: `lock:${input.id}`,
+    type: "lp-lock",
+    occurredAt: input.at,
+    tokenAddress: token || null,
+    pairAddress: text(input.pair).toLowerCase(),
+    exchange: input.exchange,
+    name: input.name,
+    symbol: input.symbol,
+    pairCreatedAt: null,
+    lpBurnPercent: null,
+    title: "LP lock",
+    detail: input.detail,
+    href: input.href,
+    live: input.live,
+  }
+}
+
 export function burnActivity(event: LpBurnEvent, live: boolean): ActivityInput {
   const token = text(event.tokenAddress).toLowerCase()
   return {

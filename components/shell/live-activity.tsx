@@ -4,7 +4,9 @@ import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from
 import Link from "next/link"
 import { Flame, Lock, Maximize2, Newspaper, TrendingUp, Zap, type LucideIcon } from "lucide-react"
 import { useClock } from "@/components/shell/clock"
+import { ProtocolBadge } from "@/components/shell/protocol-filter"
 import { Tip } from "@/components/shell/tip"
+import { pooledWethReading, protocolVersion } from "@/lib/protocol/identity"
 import { activityStore, startActivity } from "@/lib/activity/client"
 import { watchPumpTape } from "@/lib/pump/client"
 import type { MetricSlot } from "@/lib/activity/metrics"
@@ -210,8 +212,9 @@ function TokenBody({ item, now }: { item: ActivityItem; now: number | null }) {
   const pairAge = typeof item.pairCreatedAt === "string" && now != null ? now - Date.parse(item.pairCreatedAt) : NaN
   return (
     <>
-      <p className="mt-1.5 truncate text-sm font-semibold" title={`${symbol} / WETH`}>{symbol} <span className="font-normal text-muted-foreground">/ WETH</span></p>
+      <p className="mt-1.5 flex items-center gap-1.5 truncate text-sm font-semibold" title={`${symbol} / WETH`}><span className="truncate">{symbol} <span className="font-normal text-muted-foreground">/ WETH</span></span><ProtocolBadge exchange={item.exchange} /></p>
       <p className="truncate text-xs text-muted-foreground">{typeof item.symbol === "string" && item.symbol ? `$${item.symbol.replace(/^\$/, "")}` : "Identity loading…"}{name && name !== symbol ? ` · ${name}` : ""}</p>
+      {item.type === "lp-lock" && item.detail ? <p className="mt-1 text-xs text-muted-foreground">{item.detail}</p> : null}
       {item.type === "lp-burn" ? (
         <p className="mt-1.5 flex items-baseline justify-between text-xs">
           <span className="text-muted-foreground">LP burned</span>
@@ -220,7 +223,7 @@ function TokenBody({ item, now }: { item: ActivityItem; now: number | null }) {
       ) : null}
       <dl className="mt-2 grid grid-cols-3 gap-1 rounded-md bg-muted/50 px-2 py-1.5">
         <Metric label="TX" tip={DEFINITIONS.totalTx} slot={metrics.totalTx} format={(value) => value.toLocaleString("en-US")} align="left" />
-        <Metric label="WETH" tip={DEFINITIONS.pooledWeth} slot={metrics.pooledWeth} format={formatWeth} align="center" />
+        <Metric label="WETH" tip={pooledWethReading(item.exchange, null).reason ?? DEFINITIONS.pooledWeth} slot={protocolVersion(item.exchange ?? "") === "v4" ? { metric: null, status: "unavailable", error: pooledWethReading(item.exchange, null).reason } : metrics.pooledWeth} format={formatWeth} align="center" />
         <Metric label="Holders" tip={DEFINITIONS.holders} slot={metrics.holders} format={(value) => value.toLocaleString("en-US")} align="right" />
       </dl>
       <p className="mt-1.5 text-[11px] text-muted-foreground">Pair age {Number.isFinite(pairAge) ? formatAge(Math.max(0, pairAge)) : "—"}{item.exchange ? ` · ${item.exchange}` : ""}</p>

@@ -16,7 +16,9 @@ import { ActivityMetricHeader, MarketPulse, type SeriesMode } from "@/components
 import { marketClient, type MarketView } from "@/lib/market/client"
 import { EMPTY_FEED } from "@/lib/market/types"
 import { activityStore } from "@/lib/activity/client"
-import { burnActivity, pairActivity, signalActivity, SNAPSHOT_BURNS, SNAPSHOT_PAIRS, type ActivityInput, type ActivityItem } from "@/lib/activity/store"
+import { burnActivity, lockActivity, pairActivity, signalActivity, SNAPSHOT_BURNS, SNAPSHOT_PAIRS, type ActivityInput, type ActivityItem } from "@/lib/activity/store"
+import { matchesProtocol, protocolCounts, type ProtocolFilterId } from "@/lib/protocol/identity"
+import { ProtocolFilter, readProtocol } from "@/components/shell/protocol-filter"
 import { activityRatio, activitySeries, activityState, canonicalActivityKey, chartRange, CHART_RANGES, cohortBurnRate, earliestTimes, launchScore, performanceDistribution, recordConditionHistory, reserveChange, stillTrading, typicalHour, windowStats, type WindowStat } from "@/lib/activity/pulse"
 import { pumpHub } from "@/lib/pump/client"
 import { LOCAL_ZONE, resolveZone, TIME_ZONES, type PairRecord } from "@/lib/types"
@@ -247,12 +249,26 @@ function snapshotFeed(id: BoardColumnId, snapshot: SnapshotFile | null, now: num
         .slice(0, SNAPSHOT_PAIRS)
     }
     if (id === "burns") {
-      return (snapshot.lpBurns ?? [])
+      const burns = (snapshot.lpBurns ?? [])
         .filter((event) => event && (typeof event.burnAt === "string" || typeof event.detectedAt === "string"))
         .map((event) => asItem(burnActivity(event, false)))
         .filter((item) => within(item.occurredAt))
-        .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
-        .slice(0, SNAPSHOT_BURNS)
+      const locks = (snapshot.rows ?? [])
+        .filter((row) => row && row.lpStatus === "locked")
+        .map((row) => asItem(lockActivity({
+          id: row.address.toLowerCase(),
+          at: "",
+          pair: row.address,
+          token: row.tokenAddress,
+          exchange: row.exchange,
+          symbol: row.symbol ?? "",
+          name: row.tokenName || row.name,
+          detail: row.lpUnlockAt ? `Unlock ${row.lpUnlockAt}` : "Lock time is not in this record",
+          href: `/tokens/${row.tokenAddress}`,
+          live: false,
+        })))
+        .filter((item) => within(item.occurredAt))
+      return [...burns, ...locks].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)).slice(0, SNAPSHOT_BURNS)
     }
     if (id === "news" || id === "trends") {
       const kind = id === "news" ? "news" : "trend"
@@ -310,6 +326,11 @@ function ActivityBoardBody({ snapshot, mode, onClose }: { snapshot: SnapshotFile
   const [chartRangeId, setChartRangeId] = useState(() => ({ pairs: chartRangeFor("pairs"), burns: chartRangeFor("burns") }))
   const [seriesMode, setSeriesMode] = useState<{ pairs: SeriesMode; burns: SeriesMode }>(() => ({ pairs: seriesModeFor("pairs"), burns: seriesModeFor("burns") }))
   const [chartOpen, setChartOpen] = useState(() => ({ pairs: stored("weth-chart-pairs-v2", "1") !== "0", burns: stored("weth-chart-burns-v2", "1") !== "0" }))
+  const [protocol, setProtocol] = useState<{ pairs: ProtocolFilterId; burns: ProtocolFilterId }>(() => ({ pairs: readProtocol("weth-protocol-pairs"), burns: readProtocol("weth-protocol-burns") }))
+  const [securityMode, setSecurityMode] = useState<"burned" | "locked" | "all">(() => {
+    const saved = stored("weth-liquidity-mode", "burned")
+    return saved === "locked" || saved === "all" ? saved : "burned"
+  })
   const [zoneId, setZoneId] = useState(() => stored("weth-display-zone", LOCAL_ZONE))
   const [baselines, setBaselines] = useState<{ pairs: number | null; burns: number | null } | null>(null)
   const market = useBoardMarket()
@@ -591,7 +612,6 @@ function ActivityBoardBody({ snapshot, mode, onClose }: { snapshot: SnapshotFile
           zones={TIME_ZONES}
           pairTimes={pulse.times.pairs}
           now={now ?? openedAt}
-          recordedHour={Math.floor((now ?? openedAt) / 3_600_000)}
           typicalPairs={pulse.pairBaseline}
           typicalBurns={pulse.burnBaseline}
           survival={pulse.survival}
@@ -650,6 +670,26 @@ function ActivityBoardBody({ snapshot, mode, onClose }: { snapshot: SnapshotFile
                 return next
               })
             }}
+            protocol={id === "burns" ? protocol.burns : protocol.pairs}
+            onProtocol={(next) => {
+              if (id !== "pairs" && id !== "burns") return
+              const column = id
+              setProtocol((current) => ({ ...current, [column]: next }))
+              try {
+                localStorage.setItem(column === "pairs" ? "weth-protocol-pairs" : "weth-protocol-burns", next)
+              } catch {
+                // The filter still applies for this session when storage is blocked.
+              }
+            }}
+            securityMode={securityMode}
+            onSecurity={(next) => {
+              setSecurityMode(next)
+              try {
+                localStorage.setItem("weth-liquidity-mode", next)
+              } catch {
+                // The mode still applies for this session when storage is blocked.
+              }
+            }}
             canRemove={columns.length > 1}
             onRemove={() => onColumns(removeColumn(columns, id))}
           />
@@ -689,6 +729,10 @@ function BoardColumn({
   onChartRange,
   onSeries,
   onToggleChart,
+  protocol,
+  onProtocol,
+  securityMode,
+  onSecurity,
 }: {
   id: BoardColumnId
   list: ActivityItem[]
@@ -708,13 +752,21 @@ function BoardColumn({
   onChartRange: (id: string) => void
   onSeries: (mode: SeriesMode) => void
   onToggleChart: (id: "pairs" | "burns") => void
+  protocol: ProtocolFilterId
+  onProtocol: (id: ProtocolFilterId) => void
+  securityMode: "burned" | "locked" | "all"
+  onSecurity: (mode: "burned" | "locked" | "all") => void
 }) {
   const column = columnById(id)
   const Icon = COLUMN_ICON[id]
   const spanLabel = FEED_WINDOWS.find((item) => item.ms === feedSpanMs)?.label ?? "All"
   const live = id === "pairs" || id === "burns" ? filterActivity(list, id === "pairs" ? "pairs" : "burns").filter((item) => now == null || inFeedWindow(item.occurredAt, now, feedSpanMs)) : []
   const published = snapshotFeed(id, snapshot, now, feedSpanMs)
-  const shown = live.length > 0 ? live : published
+  const extraLocks = id === "burns" && live.length > 0 ? published.filter((item) => item.type === "lp-lock" && !live.some((row) => row.activityId === item.activityId)) : []
+  const timed = live.length > 0 ? [...live, ...extraLocks] : published
+  const secured = id !== "burns" ? timed : timed.filter((item) => securityMode === "all" || (securityMode === "locked" ? item.type === "lp-lock" : item.type === "lp-burn"))
+  const counts = protocolCounts(secured.map((item) => item.exchange))
+  const shown = id === "pairs" || id === "burns" ? secured.filter((item) => matchesProtocol(item.exchange, protocol)) : timed
   const count = id === "news" ? (windowData ? windowData.news.length + windowData.generic.length : published.length || null) : id === "trends" ? windowData?.trends.length ?? (published.length || null) : id === "pumpers" ? null : shown.length
   return (
     <section aria-labelledby={`board-${id}`} className="flex h-full min-h-0 w-full flex-col">
@@ -727,9 +779,17 @@ function BoardColumn({
           <X size={14} aria-hidden />
         </button>
       </header>
+      {id === "burns" ? (
+        <div className="flex flex-wrap gap-1 px-3 pt-2" role="group" aria-label="Liquidity security">
+          {([["burned", "Burned"], ["locked", "Locked"], ["all", "All"]] as const).map(([mode, label]) => (
+            <button key={mode} type="button" aria-pressed={securityMode === mode} onClick={() => onSecurity(mode)} className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${securityMode === mode ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}>{label}</button>
+          ))}
+        </div>
+      ) : null}
+      {id === "pairs" || id === "burns" ? <ProtocolFilter value={protocol} counts={counts} onChange={onProtocol} /> : null}
       {now != null && pulse && (id === "pairs" || id === "burns") ? (
         <ActivityMetricHeader
-          title={id === "pairs" ? "Pairs" : "LP burns"}
+          title={id === "pairs" ? "Pairs" : securityMode === "locked" ? "LP locks" : "LP burns"}
           stats={id === "pairs" ? pulse.pairStats : pulse.burnStats}
           level={id === "pairs" ? pulse.pairLevel : pulse.burnLevel}
           open={chartOpen[id]}
@@ -745,7 +805,7 @@ function BoardColumn({
         />
       ) : null}
       {id === "pairs" || id === "burns" ? (
-        <LiveColumn items={shown} readyAt={readyAt} waiting={snapshot == null && live.length === 0} empty={feedSpanMs == null ? (id === "pairs" ? "No new pairs yet." : "No LP burns yet.") : id === "pairs" ? `No new pairs in the last ${spanLabel}.` : `No LP burns in the last ${spanLabel}.`} />
+        <LiveColumn items={shown} readyAt={readyAt} waiting={snapshot == null && live.length === 0} empty={id === "pairs" ? (feedSpanMs == null ? "No new pairs yet." : `No new pairs in the last ${spanLabel}.`) : securityMode === "locked" ? (feedSpanMs == null ? "No LP locks yet." : `No timed LP locks in the last ${spanLabel}. Locks without a timestamp stay on All.`) : (feedSpanMs == null ? "No LP burns yet." : `No LP burns in the last ${spanLabel}.`)} />
       ) : id === "pumpers" ? (
         snapshot ? <TopPumpers snapshot={snapshot} /> : <p className="px-3 py-3 text-sm text-muted-foreground">Waiting for the published pair list.</p>
       ) : windowData ? (

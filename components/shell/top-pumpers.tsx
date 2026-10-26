@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import Link from "next/link"
 import { Popover } from "@/components/shell/popover"
+import { ProtocolBadge, ProtocolFilter, readProtocol } from "@/components/shell/protocol-filter"
+import { matchesProtocol, pooledWethReading, protocolCounts, type ProtocolFilterId } from "@/lib/protocol/identity"
 import { Tip } from "@/components/shell/tip"
 import { activityStore } from "@/lib/activity/client"
 import { formatCompact, rankActivity, swapsInWindow, type ActivityRank, type ActivitySort } from "@/lib/activity/pulse"
@@ -131,6 +133,7 @@ function candidates(rows: readonly PairRecord[], version: number): TokenCandidat
 export function TopPumpers({ snapshot }: { snapshot: SnapshotFile | null }) {
   const version = useSyncExternalStore(pumpHub().subscribe, () => pumpHub().version(), () => 0)
   const [filters, setFilters] = useState<Filters>(INITIAL)
+  const [protocol, setProtocol] = useState<ProtocolFilterId>(() => readProtocol("weth-protocol-pumpers"))
   const [now, setNow] = useState(() => Date.now())
   const [customText, setCustomText] = useState("4")
   const [customUnit, setCustomUnit] = useState<"m" | "h" | "d">("h")
@@ -153,6 +156,11 @@ export function TopPumpers({ snapshot }: { snapshot: SnapshotFile | null }) {
   const start = filters.custom?.start ?? end - (parsedRange.ok ? parsedRange.ms : 24 * 60 * 60 * 1000)
   const label = filters.custom ? "Custom" : filters.range.toUpperCase()
   const tokens = useMemo(() => candidates(snapshot?.rows ?? [], version), [snapshot, version])
+  const exchangeOf = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const row of snapshot?.rows ?? []) map.set(row.address.toLowerCase(), row.exchange)
+    return map
+  }, [snapshot])
   const storeRev = useSyncExternalStore(activityStore().subscribe, activityStore().revision, () => 0)
   const activity = useMemo(() => {
     if (filters.view === "pump" || !snapshot || storeRev < 0) return [] as ActivityRank[]
@@ -175,9 +183,9 @@ export function TopPumpers({ snapshot }: { snapshot: SnapshotFile | null }) {
         percent: null as number | null,
       }
     })
-    const usable = filters.view === "tx" ? rows.filter((row) => row.tx > 0) : rows
+    const usable = (filters.view === "tx" ? rows.filter((row) => row.tx > 0) : rows).filter((row) => matchesProtocol(exchangeOf.get(row.pair), protocol))
     return rankActivity(usable, filters.view, filters.limit)
-  }, [filters.view, filters.range, filters.limit, snapshot, start, end, storeRev])
+  }, [filters.view, filters.range, filters.limit, snapshot, start, end, storeRev, exchangeOf, protocol])
   const options = useMemo<RankOptions>(() => ({
     start,
     end,
@@ -196,11 +204,11 @@ export function TopPumpers({ snapshot }: { snapshot: SnapshotFile | null }) {
   }), [start, end, filters, version])
   const ranked = useMemo(() => {
     try {
-      return rankPumpers(tokens, options)
+      return rankPumpers(tokens.filter((token) => matchesProtocol(exchangeOf.get(token.pair.toLowerCase()), protocol)), options)
     } catch {
       return { items: [], hiddenLowConfidence: [], analyzed: tokens.length, excludedYoung: 0, excludedInsufficient: 0, excludedFlat: 0, excludedFiltered: 0, coverage: { requestedMs: Math.max(0, options.end - options.start), availableMs: null, complete: false } }
     }
-  }, [tokens, options])
+  }, [tokens, options, exchangeOf, protocol])
   const signature = ranked.items.map((row) => `${row.pair}:${row.rank}`).join("|")
   const [track, setTrack] = useState<{ signature: string; prior: Map<string, number> | null; moves: Map<string, number | "new">; at: number }>({ signature: "", prior: null, moves: new Map(), at: 0 })
   useEffect(() => {
@@ -306,6 +314,10 @@ export function TopPumpers({ snapshot }: { snapshot: SnapshotFile | null }) {
             </button>
           ))}
         </div>
+        <ProtocolFilter value={protocol} counts={protocolCounts(filters.view === "pump" ? tokens.map((token) => exchangeOf.get(token.pair.toLowerCase())) : (snapshot?.rows ?? []).map((row) => row.exchange))} onChange={(id) => {
+          setProtocol(id)
+          try { localStorage.setItem("weth-protocol-pumpers", id) } catch { /* this session still filters */ }
+        }} />
         {filters.view === "pump" ? (
         <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Ranking mode">
           <button type="button" aria-pressed={filters.mode === "window"} onClick={() => setFilters((current) => ({ ...current, mode: "window" }))} className={`rounded px-1.5 py-0.5 text-[11px] ${filters.mode === "window" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}>Window return</button>
@@ -359,7 +371,7 @@ export function TopPumpers({ snapshot }: { snapshot: SnapshotFile | null }) {
             <p className="px-3 py-3 text-sm text-muted-foreground">{filters.view === "tx" ? "No timed swaps in this period yet. Older logs loaded in one batch are not assigned to the interval." : "No tokens have that figure yet."}</p>
           ) : (
             <ol className="flex flex-col gap-2 px-3 py-3">
-              {activity.map((row) => <ActivityCard key={row.pair} row={row} rangeLabel={label} />)}
+              {activity.map((row) => <ActivityCard key={row.pair} row={row} rangeLabel={label} exchange={exchangeOf.get(row.pair) ?? null} />)}
             </ol>
           )
         ) : ranked.analyzed === 0 ? (
@@ -379,7 +391,7 @@ export function TopPumpers({ snapshot }: { snapshot: SnapshotFile | null }) {
         ) : (
           <ol className="flex flex-col gap-2 px-3 py-3">
             {ranked.items.length >= 3 ? <p className="px-1 text-[11px]"><Link href={`/chart/?set=${ranked.items.slice(0, 3).map((row) => row.pair).join(",")}`} className="text-primary hover:underline">Compare top 3</Link></p> : null}
-            {ranked.items.map((row) => <PumpCard key={row.pair} row={row} now={now} label={label} move={track.moves.get(row.pair) ?? null} />)}
+            {ranked.items.map((row) => <PumpCard key={row.pair} row={row} now={now} label={label} move={track.moves.get(row.pair) ?? null} exchange={exchangeOf.get(row.pair.toLowerCase()) ?? null} />)}
           </ol>
         )}
         {ranked.hiddenLowConfidence.length > 0 ? (
@@ -438,13 +450,19 @@ function PumpDetail({ row, now }: { row: PumpRow; now: number }) {
   )
 }
 
-function ActivityCard({ row, rangeLabel }: { row: ActivityRank; rangeLabel: string }) {
+function shownWeth(exchange: string | null, value: number | null): string {
+  const reading = pooledWethReading(exchange, value)
+  return reading.reason ? "N/A" : formatWeth(reading.value)
+}
+
+function ActivityCard({ row, rangeLabel, exchange }: { row: ActivityRank; rangeLabel: string; exchange: string | null }) {
   const ratio = row.buys != null && row.sells != null && row.sells > 0 ? row.buys / row.sells : null
   return (
     <li className="rounded-lg bg-card/60 px-3 py-2.5 ring-1 ring-foreground/10">
       <div className="flex items-baseline gap-2">
         <span className={`text-xs font-semibold tabular-nums ${row.rank <= 3 ? "text-primary" : "text-muted-foreground"}`}>#{row.rank}</span>
         <Link href={`/tokens/${row.token}`} className="truncate text-sm font-semibold hover:underline">{ticker(row.symbol)}</Link>
+        <ProtocolBadge exchange={exchange} />
         <Link href={`/chart/?pair=${encodeURIComponent(row.pair)}`} className="text-[11px] text-primary hover:underline">Analyze chart</Link>
         <span className="ml-auto text-sm font-semibold tabular-nums">TX {formatCompact(row.tx)}</span>
       </div>
@@ -456,7 +474,7 @@ function ActivityCard({ row, rangeLabel }: { row: ActivityRank; rangeLabel: stri
         {ratio != null ? ` · B/S ${ratio.toFixed(2)}` : ""}
       </p>
       <p className="mt-1 text-[11px] text-muted-foreground tabular-nums">
-        WETH {formatWeth(row.pooledWeth)} · Holders {formatCount(row.holders)}
+        WETH {shownWeth(exchange, row.pooledWeth)} · Holders {formatCount(row.holders)}
         {row.volumeUsd != null ? ` · Vol ${formatUsd(row.volumeUsd)}` : ""}
         {row.percent != null ? ` · ${row.percent >= 0 ? "+" : ""}${row.percent.toFixed(0)}%` : ""}
         {row.traders == null ? " · unique traders not in the swap log" : ` · traders ${formatCompact(row.traders)}${row.density != null ? ` · ${row.density.toFixed(2)} tx/trader` : ""}`}
@@ -473,13 +491,14 @@ function FilterField({ label, value, onChange }: { label: string; value: string;
   )
 }
 
-function PumpCard({ row, now, label, move }: { row: PumpRow; now: number; label: string; move: number | "new" | null }) {
+function PumpCard({ row, now, label, move, exchange }: { row: PumpRow; now: number; label: string; move: number | "new" | null; exchange: string | null }) {
   const fresh = move === "new" || (typeof move === "number" && move !== 0)
   return (
     <li className={`rounded-lg bg-card/60 px-3 py-2.5 ring-1 ring-foreground/10 ${fresh ? "rank-enter" : ""}`}>
       <div className="flex items-baseline gap-2">
         <span className={`text-xs font-semibold tabular-nums ${row.rank <= 3 ? "text-primary" : "text-muted-foreground"}`}>#{row.rank}</span>
         <Link href={`/tokens/${row.token}`} className="truncate text-sm font-semibold hover:underline">{ticker(row.symbol)}</Link>
+        <ProtocolBadge exchange={exchange} />
         <Link href={`/chart/?pair=${encodeURIComponent(row.pair)}`} className="text-[11px] text-primary hover:underline">Analyze chart</Link>
         {move === "new" ? <span className="rounded bg-primary/15 px-1 text-[10px] font-semibold tracking-wide text-primary">NEW</span> : null}
         {typeof move === "number" && move > 0 ? <span className="text-[10px] text-muted-foreground tabular-nums">↑{move}</span> : null}
@@ -498,7 +517,7 @@ function PumpCard({ row, now, label, move }: { row: PumpRow; now: number; label:
         {formatAge(Math.max(0, now - row.createdAt))}
       </p>
       <p className="mt-1 text-[11px] text-muted-foreground tabular-nums">
-        WETH {formatWeth(row.pooledWeth)} · TX {formatCount(row.totalTx)} · Holders {formatCount(row.holders)}
+        WETH {shownWeth(exchange, row.pooledWeth)} · TX {formatCount(row.totalTx)} · Holders {formatCount(row.holders)}
         {row.liquidityUsd != null ? ` · Liq ${formatUsd(row.liquidityUsd)}` : ""}
         {row.volumeUsd != null ? ` · Vol ${formatUsd(row.volumeUsd)}` : ""}
         {typeof row.lpBurnPercent === "number" && row.lpBurnPercent > 0 ? ` · LP ${row.lpBurnPercent.toFixed(1)}%` : ""}

@@ -1,6 +1,6 @@
 import { onActivity, type ActivitySighting } from "@/lib/activity/bus"
 import { EnrichmentEngine } from "@/lib/activity/enrichment"
-import { ActivityStore, burnActivity, pairActivity } from "@/lib/activity/store"
+import { ActivityStore, burnActivity, lockActivity, pairActivity } from "@/lib/activity/store"
 
 let store: ActivityStore | null = null
 let engine: EnrichmentEngine | null = null
@@ -23,6 +23,22 @@ export function applySighting(target: ActivityStore, sighting: ActivitySighting)
     const event = sighting.event
     target.ensurePair({ pair: event.pair, token: event.tokenAddress, exchange: event.exchange, createdAt: event.createdAt, creationBlock: null })
     target.upsert(burnActivity(event, true))
+  } else if (sighting.type === "lock") {
+    const record = sighting.record
+    const lock = sighting.lock
+    const position = lock.positionId ? `Position #${lock.positionId}` : "LP token"
+    target.upsert(lockActivity({
+      id: `${lock.tx}:${lock.logIndex}`,
+      at: sighting.at,
+      pair: lock.pair,
+      token: record?.tokenAddress ?? null,
+      exchange: record?.exchange ?? null,
+      symbol: record?.symbol ?? "",
+      name: record?.tokenName || record?.name || "",
+      detail: `${lock.locker.name} · ${position}`,
+      href: record?.url || `https://etherscan.io/tx/${lock.tx}`,
+      live: true,
+    }))
   } else {
     engine?.onHead(sighting.block)
   }

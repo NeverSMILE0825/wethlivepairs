@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { publishActivity } from "@/lib/activity/bus"
 import { createAudioContext, notificationState, playNamedTone, requestNotifications } from "@/lib/alerts"
 import { freshLiveAlerts, isLiveBurnAlert, notificationCopy, passesNotifyFilter } from "@/lib/lp/burn-logic"
+import { lockFromMessage, liveLockFilter } from "@/lib/lp/lock-logic"
 import { LIVE_HEADS_URL, liveLogFilter, livePairFilter, liveBurnEvent, recordFromPairSighting, sightingFromMessage } from "@/lib/lp/live-feed"
 import type { ParsedTransfer } from "@/lib/lp/burn-logic"
 import type { PairRecord } from "@/lib/types"
@@ -301,6 +302,7 @@ export function LpMonitor({ children }: { children: ReactNode }) {
       ws.onopen = () => {
         ws?.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_subscribe", params: ["newHeads"] }))
         ws?.send(JSON.stringify(liveLogFilter()))
+        ws?.send(JSON.stringify(liveLockFilter()))
         ws?.send(JSON.stringify(livePairFilter()))
         if (!closed) setSocket("open")
       }
@@ -314,7 +316,13 @@ export function LpMonitor({ children }: { children: ReactNode }) {
         const hex = (message as { params?: { result?: { number?: string } } }).params?.result?.number
         if (typeof hex === "string" && !closed) setBlock(Number.parseInt(hex, 16))
         const sighting = sightingFromMessage(message, new Set(pairsRef.current.keys()))
-        if (!sighting || closed) return
+        if (closed) return
+        if (!sighting) {
+          const lock = lockFromMessage(message)
+          if (!lock) return
+          publishActivity({ type: "lock", lock, record: pairsRef.current.get(lock.pair) ?? null, at: new Date().toISOString() })
+          return
+        }
         if (sighting.type === "pair") {
           const seenAt = new Date().toISOString()
           if (!pairsRef.current.has(sighting.pair)) pairsRef.current.set(sighting.pair, recordFromPairSighting(sighting, seenAt))

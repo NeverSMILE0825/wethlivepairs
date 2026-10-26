@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import { HelpSearch } from "@/components/shell/help-search"
 import { PageFrame } from "@/components/trends/widgets"
 import { DEFINITIONS } from "@/lib/market/copy"
 import { GAS_SCORE_GWEI } from "@/lib/activity/pulse"
@@ -9,9 +10,9 @@ import { DEFAULT_GAS_REFRESH_MS, DEFAULT_PRICE_REFRESH_MS, GAS_STALE_MS, PRICE_S
 
 export const metadata = { title: "Help · WETH live pairs" }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, id, children }: { title: string; id?: string; children: ReactNode }) {
   return (
-    <section className="max-w-3xl">
+    <section id={id} data-help-section className="max-w-3xl">
       <h2 className="text-lg font-semibold">{title}</h2>
       <div className="mt-2 flex flex-col gap-2 text-sm leading-6 text-muted-foreground">{children}</div>
     </section>
@@ -36,6 +37,7 @@ const seconds = (ms: number) => `${Math.round(ms / 1000)} seconds`
 export default function HelpPage() {
   return (
     <PageFrame eyebrow="Help" title="Market header, Live Activity, and Top Pumpers" lede="What the ETH price, gas, Live Activity numbers, and Top Pumpers ranking mean, where they come from, and how fresh they are. LP burn detection always runs first; none of this can delay it.">
+      <HelpSearch />
       <Section title="ETH price in the header">
         <p>The header shows the ETH/USD price and its change over 1 hour, 24 hours, and 7 days. A plus or minus sign and an arrow show the direction, so it never depends on color alone. Changes under 0.05% are shown neutral.</p>
         <Terms items={[["1H", DEFINITIONS.change1h], ["24H", DEFINITIONS.change24h], ["7D", DEFINITIONS.change7d]]} />
@@ -115,6 +117,31 @@ export default function HelpPage() {
             ["What stays unknown", "Holder retention, wallet clusters, deployer balances, and MEV identity. DEXTools 24h makers and buys are shown only on a pair at least a day old, and only as 24-hour figures."],
           ]}
         />
+      </Section>
+
+      <Section id="protocol-filters" title="Protocol filters">
+        <p>Uniswap V2, V3, and V4 are different pool designs. A badge on a card says which one it is. V3 adds the fee tier when the pool records it, such as V3 · 0.3%. V4 adds Hook only when the pool has a non-zero hook. SushiSwap is shown as Sushi and is not included in the V2 filter.</p>
+        <p>The same All, V2, V3, and V4 control is on Pairs, Liquidity Security, and Top Pumpers. Each view remembers its own choice. The time range still applies. V3 and 6H means Uniswap V3 pools created in the previous six hours. The filter does not change how a pump multiple, transaction count, or holder count is calculated. It only chooses which pools are ranked.</p>
+      </Section>
+
+      <Section id="lp-locks" title="LP locks">
+        <p>Liquidity Security has Burned, Locked, and All. Burned is the existing LP burn monitor. Locked shows liquidity sent to a verified locker. A transfer into the dead address is a burn. A transfer into Team Finance or UNCX is a lock. Those are never added together.</p>
+        <p>The verified V2 lockers are Team Finance (0xe2fe530c047f2d85298b07d9333c05737f1435fb) and the two UNCX Uniswap V2 lockers published in the UNCX docs. A contract is not treated as a locker because its name contains &quot;lock&quot;. V3 and V4 locker addresses are not configured until both the provider&apos;s documentation and the explorer identify them.</p>
+        <p>A lock card names the locker, the position or LP token, and the transaction. Principal withdrawal is restricted until unlock for these V2 lockers. Fee collection on a V2 lock is restricted because the trading fees sit inside the LP token. Increasing liquidity and some extensions stay Unknown when the contract does not make that capability explicit. Custody by a locker is not a promise that nothing about the position can change.</p>
+        <p>If the unlock time has passed and the tokens are still at the locker, the state is Expired / Withdrawable. It becomes Withdrawn only after a withdrawal is observed. Several positions stay as separate locks. The next unlock is the soonest active one.</p>
+      </Section>
+
+      <Section id="lp-lock-percentage" title="What does 100% V3 position locked mean?">
+        <p>It means the identified liquidity-position NFT is held by a verified locker. It does not mean 100% of the pool is locked. A V3 or V4 pool can have many positions in different tick ranges. Position lock percent describes that one position. Pool-wide lock percent is shown only when the pool uses fungible LP tokens and the locked amount, burned amount, and supply are all known. Otherwise pool-wide locked is N/A.</p>
+        <p>Example: a V2 pair with 100,000 LP available can have 60% burned and 35% locked. The card says 60% burned and 35% locked. It does not say 95% burned. For a V3 position entirely inside a locker, the card says 100% of that position and N/A for the pool.</p>
+      </Section>
+
+      <Section id="narrative-clusters" title="Narrative clusters">
+        <p>A trend does not require the same name or ticker. Tokens are grouped when they share specific entities, such as Tesla, Elon Musk, and Optimus. The generic words AI, dog, and cat do not create a cluster by themselves. AI Dog and AI Lawyer stay separate. The cluster names the chains it was seen on. A Solana observation followed later by an Ethereum observation is reported as a Solana to Ethereum move, with the lag from the first observation. Live Solana, GMGN, and pump.fun feeds are not configured, so this grouping runs on observations the app already has. No language model is called.</p>
+      </Section>
+
+      <Section id="market-condition-history" title="Market condition history">
+        <p>The score chart in Market conditions is the history published with the site, not a line stored in this browser. Each publish adds one point. Another browser sees the same file. The score uses pair pace, LP burn pace, gas, and ETH when those readings exist. Swap counts and launch multiples are left out of the published point because that job does not measure them, and a missing part is not scored as zero. The 7-day pair heatmap remains beside the hourly distribution.</p>
       </Section>
 
       <Section title="Data sources">

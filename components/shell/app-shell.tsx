@@ -30,6 +30,7 @@ const LINKS = [
   { href: "/chart", label: "Chart Intelligence", icon: LineChart },
   { href: "/tokens", label: "Token Explorer", icon: Search },
   { href: "/alerts", label: "Alerts", icon: Bell },
+  { href: "/help", label: "Help", icon: CircleHelp },
 ] as const
 
 /** Shown in the right-hand header cluster on wide screens and in the menu on narrow ones. */

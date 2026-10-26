@@ -1,5 +1,7 @@
-import { access, mkdir, writeFile } from "node:fs/promises"
+import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
+import { mergeConditionPoints, type ConditionPoint } from "../lib/activity/market-history"
+import { launchScore } from "../lib/activity/pulse"
 import { buildSignals } from "../lib/activity/signals"
 import { fetchPairDetails } from "../lib/details"
 import { fetchGasTracker } from "../lib/market/gas-tracker"
@@ -126,6 +128,7 @@ async function main() {
   await mkdir(path.dirname(file), { recursive: true })
   await writeFile(file, JSON.stringify(snapshot))
   const ethUsd = await writeMarket()
+  await writeConditionHistory(withChain, lp.events, generatedAt)
   await writePumpers(withChain, ethUsd)
   await writeGasTracker()
   console.log(
@@ -143,6 +146,49 @@ async function writeMarket(): Promise<number | null> {
   } catch (error) {
     console.warn(`[MARKET] Seed skipped. ${error instanceof Error ? error.message : "unknown error"}`)
     return null
+  }
+}
+
+/** Append one published market-condition point. A failed read starts a new file and never fails the snapshot. */
+async function writeConditionHistory(rows: PairRecord[], burns: { burnAt?: string | null; detectedAt?: string | null }[], generatedAt: string) {
+  const file = path.join("public", "data", "market-conditions.json")
+  const now = Date.parse(generatedAt)
+  const hour = 60 * 60 * 1000
+  const inside = (at: number, start: number) => Number.isFinite(at) && at <= start + hour && at > start
+  const pairs1h = rows.filter((row) => inside(Date.parse(row.created_at), now - hour)).length
+  const pairsPrevious = rows.filter((row) => inside(Date.parse(row.created_at), now - 2 * hour)).length
+  const burnTime = (event: { burnAt?: string | null; detectedAt?: string | null }) => Date.parse(event.burnAt || event.detectedAt || "")
+  const burns1h = burns.filter((event) => inside(burnTime(event), now - hour)).length
+  const burnsPrevious = burns.filter((event) => inside(burnTime(event), now - 2 * hour)).length
+  let gas: number | null = null
+  let eth1h: number | null = null
+  let eth24h: number | null = null
+  try {
+    const status = JSON.parse(await readFile(path.join("public", "data", "market.json"), "utf8")) as { gas?: { data?: { standard?: { gwei?: number } } }; eth?: { data?: { change1h?: number; change24h?: number } } }
+    gas = status.gas?.data?.standard?.gwei ?? null
+    eth1h = status.eth?.data?.change1h ?? null
+    eth24h = status.eth?.data?.change24h ?? null
+  } catch {
+    gas = null
+  }
+  const scored = launchScore({ pairs1h, pairsPrevious, pairsBaseline: null, burns1h, burnsPrevious, burnsBaseline: null, tx1h: null, txPrevious: null, txBaseline: null, netWeth: null, medianMultiple: null, above12Share: null, gasGwei: gas, eth1h, eth24h })
+  const point: ConditionPoint = { at: generatedAt, score: scored.score, band: scored.band, pairs: pairs1h, burns: burns1h, locks: rows.filter((row) => row.lpStatus === "locked").length, gas, eth1h, methodology: "observed-counts-v1" }
+  let existing: ConditionPoint[] = []
+  try {
+    const response = await fetch("https://wethlivepairs.site/data/market-conditions.json")
+    if (response.ok) {
+      const body = await response.json() as { points?: ConditionPoint[] }
+      if (Array.isArray(body.points)) existing = body.points
+    }
+  } catch {
+    existing = []
+  }
+  try {
+    await mkdir(path.dirname(file), { recursive: true })
+    await writeFile(file, JSON.stringify({ points: mergeConditionPoints(existing, point) }))
+    console.log(`[MARKET] History ${point.score} / 100 · pairs ${pairs1h} · burns ${burns1h}`)
+  } catch (error) {
+    console.warn(`[MARKET] History skipped. ${error instanceof Error ? error.message : "unknown error"}`)
   }
 }
 
