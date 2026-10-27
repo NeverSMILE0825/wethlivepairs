@@ -12,6 +12,7 @@ import { watchPumpTape } from "@/lib/pump/client"
 import type { MetricSlot } from "@/lib/activity/metrics"
 import { ACTIVITY_FILTERS, filterActivity, type ActivityFilter, type ActivityItem, type ActivityType } from "@/lib/activity/store"
 import { DEFINITIONS, SOURCE_LABEL } from "@/lib/market/copy"
+import { ItemBoundary } from "@/components/shell/recover"
 import { formatAge, formatWeth } from "@/lib/market/format"
 import type { MonitorMode } from "@/components/lp/monitor-context"
 import type { SnapshotFile } from "@/lib/narrative/types"
@@ -134,7 +135,9 @@ export function LiveActivity({ snapshot, mode, expanded, onExpanded }: { snapsho
       </div>
       <ul className="flex flex-col gap-2 px-3 py-3" aria-live="off">
         {shown.slice(0, limit).map((item) => (
-          <ActivityCard key={item.activityId} item={item} highlight={readyAt != null && item.receivedAt > readyAt} />
+          <ItemBoundary key={item.activityId}>
+            <ActivityCard item={item} highlight={readyAt != null && item.receivedAt > readyAt} />
+          </ItemBoundary>
         ))}
         {shown.length === 0 ? <li className="px-1 text-sm text-muted-foreground">{list.length === 0 ? "Activity appears after the dataset loads." : "No activity of this type yet."}</li> : null}
       </ul>

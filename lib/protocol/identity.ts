@@ -19,7 +19,7 @@ export type ProtocolIdentity = {
 const ZERO_HOOK = "0x0000000000000000000000000000000000000000"
 
 export function protocolVersion(exchange: string): ProtocolVersion {
-  const name = exchange.trim()
+  const name = typeof exchange === "string" ? exchange.trim() : ""
   if (/uniswap/i.test(name) && /\bv4\b/i.test(name)) return "v4"
   if (/uniswap/i.test(name) && /\bv3\b/i.test(name)) return "v3"
   if (/uniswap/i.test(name) && /\bv2\b/i.test(name)) return "v2"
@@ -35,12 +35,13 @@ export function formatFeeTier(feeBps: number | null | undefined): string | null 
 }
 
 export function protocolIdentity(exchange: string, extra?: { feeBps?: number | null; hook?: string | null }): ProtocolIdentity {
-  const version = protocolVersion(exchange)
+  const name = typeof exchange === "string" ? exchange.trim() : ""
+  const version = protocolVersion(name)
   const fee = formatFeeTier(extra?.feeBps)
   const hookAddress = (extra?.hook ?? "").toLowerCase()
   const hook = hookAddress !== "" && hookAddress !== ZERO_HOOK
-  const dex = version === "other" ? (exchange.trim() || "Unknown DEX") : `Uniswap ${version.toUpperCase()}`
-  let badge = version === "other" ? (/\bsushi/i.test(exchange) ? "Sushi" : "DEX") : version.toUpperCase()
+  const dex = version === "other" ? (name || "Unknown DEX") : `Uniswap ${version.toUpperCase()}`
+  let badge = version === "other" ? (/\bsushi/i.test(name) ? "Sushi" : "DEX") : version.toUpperCase()
   if (version === "v3" && fee) badge = `V3 · ${fee}`
   if (version === "v4" && hook) badge = "V4 · Hook"
   const title = [dex, fee ? `${fee} fee` : null, hook ? "hooked pool" : null].filter(Boolean).join(" · ")

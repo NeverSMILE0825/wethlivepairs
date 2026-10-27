@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { AlertWatcher } from "@/components/alert-watcher";
 import { LpMonitor } from "@/components/lp/monitor-context";
 import { AppShell } from "@/components/shell/app-shell";
+import { recoverBootScript } from "@/lib/recover";
 import { themeBootScript } from "@/lib/theme";
 import "./globals.css";
 
@@ -31,6 +32,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+        <script dangerouslySetInnerHTML={{ __html: recoverBootScript }} />
       </head>
       <body className="min-h-full flex flex-col">
         <LpMonitor>

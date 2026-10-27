@@ -24,6 +24,7 @@ import { pumpHub } from "@/lib/pump/client"
 import { LOCAL_ZONE, resolveZone, TIME_ZONES, type PairRecord } from "@/lib/types"
 import { formatAge } from "@/lib/market/format"
 import type { MonitorMode } from "@/components/lp/monitor-context"
+import { ItemBoundary } from "@/components/shell/recover"
 
 const PAGE = 100
 
@@ -872,7 +873,9 @@ function LiveColumn({ items, readyAt, waiting, empty }: { items: ActivityItem[];
       ) : null}
       <ul className="flex flex-col gap-2 px-3 py-3">
         {shown.slice(0, limit).map((item) => (
-          <ActivityCard key={item.activityId} item={item} highlight={item.receivedAt > readyAt} />
+          <ItemBoundary key={item.activityId}>
+            <ActivityCard item={item} highlight={item.receivedAt > readyAt} />
+          </ItemBoundary>
         ))}
         {shown.length === 0 ? <li className="px-1 text-sm text-muted-foreground">{waiting ? "Activity appears after the dataset loads." : empty}</li> : null}
       </ul>

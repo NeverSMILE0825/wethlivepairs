@@ -10,6 +10,7 @@ test("protocol badges keep V2, V3 fee, and V4 hook distinct", () => {
   assert.equal(protocolIdentity("Uniswap V4", { hook: "0x0000000000000000000000000000000000000000" }).hook, false)
   assert.equal(formatFeeTier(500), "0.05%")
   assert.equal(protocolIdentity("SushiSwap").badge, "Sushi")
+  assert.equal(protocolIdentity(undefined as unknown as string).badge, "DEX")
 })
 
 test("protocol filter counts V2, V3, and V4 without treating SushiSwap as Uniswap V2", () => {

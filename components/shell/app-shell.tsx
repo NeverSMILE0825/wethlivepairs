@@ -15,6 +15,8 @@ import { ActivityBoard } from "@/components/shell/activity-board"
 import { LiveActivity } from "@/components/shell/live-activity"
 import { Popover } from "@/components/shell/popover"
 import { activityEngine } from "@/lib/activity/client"
+import { clearRecovery } from "@/lib/recover"
+import { Recover } from "@/components/shell/recover"
 
 function isActivityRoute(path: string | null): boolean {
   return path === "/all" || path === "/all/" || (path?.startsWith("/all/") ?? false)
@@ -78,6 +80,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (activityRoute) setExpanded(true)
     setTour(localStorage.getItem("weth-onboarded") !== "1")
     setNow(Date.now())
+    const recovered = window.setTimeout(clearRecovery, 4000)
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     function onKey(event: KeyboardEvent) {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -87,6 +90,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
     window.addEventListener("keydown", onKey)
     return () => {
+      window.clearTimeout(recovered)
       window.clearInterval(timer)
       window.removeEventListener("keydown", onKey)
     }
@@ -167,8 +171,12 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span className="hidden min-[1900px]:inline">Search token, ticker, contract…</span>
               <kbd className="hidden rounded bg-muted px-1.5 py-0.5 min-[1900px]:inline">Ctrl K</kbd>
             </button>
-            <EthMarketWidget />
-            <EthereumGasWidget />
+            <Recover label="the price">
+              <EthMarketWidget />
+            </Recover>
+            <Recover label="gas">
+              <EthereumGasWidget />
+            </Recover>
             <Link href="/system" aria-label="Diagnostics" title="Diagnostics" className={`hidden h-8 items-center rounded-md px-2 sm:flex ${pathname.startsWith("/system") ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
               <ActivityIcon size={15} aria-hidden />
             </Link>
@@ -213,11 +221,17 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
       <HistoryBanner backfill={snapshot?.backfill} />
       <div className="flex min-w-0 flex-1">
-        <div className="min-w-0 flex-1">{expanded ? null : children}</div>
-        {feed ? <LiveActivity snapshot={snapshot} mode={mode} expanded={expanded} onExpanded={setExpanded} /> : null}
+        <div className="min-w-0 flex-1">{expanded ? null : <Recover label="this page">{children}</Recover>}</div>
+        {feed ? (
+          <Recover label="live activity" className="hidden xl:block">
+            <LiveActivity snapshot={snapshot} mode={mode} expanded={expanded} onExpanded={setExpanded} />
+          </Recover>
+        ) : null}
       </div>
       {feed && expanded ? (
-        <ActivityBoard snapshot={snapshot} mode={mode} onClose={closeBoard} />
+        <Recover label="the live board">
+          <ActivityBoard snapshot={snapshot} mode={mode} onClose={closeBoard} />
+        </Recover>
       ) : null}
       {queryOpen ? <CommandSearch onClose={() => setQueryOpen(false)} /> : null}
       {tour ? <Welcome onClose={(forever) => { if (forever) localStorage.setItem("weth-onboarded", "1"); setTour(false) }} /> : null}

@@ -465,7 +465,7 @@ export function PairFinder() {
     [exchanges, filters],
   )
   const rows = useMemo(
-    () => (run ? applyView(run.records, activeFilters, sort) : []),
+    () => (run ? applyView(run.records, activeFilters, sort).filter((row) => typeof row.address === "string" && typeof row.tokenAddress === "string") : []),
     [run, activeFilters, sort],
   )
   const filtered = isFiltered(activeFilters)
