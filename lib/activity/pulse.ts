@@ -87,9 +87,9 @@ export function windowStats(times: readonly number[], now: number): WindowStat[]
 }
 
 /** Snapshot ids and live card ids name the same pair or burn. `pair:` and `burn:` are the same event, not a second one. */
-export function canonicalActivityKey(kind: "pair" | "burn", id: string): string {
+export function canonicalActivityKey(kind: "pair" | "burn" | "lock", id: string): string {
   const raw = id.trim().toLowerCase()
-  const prefix = kind === "burn" ? "burn:" : "pair:"
+  const prefix = kind === "burn" ? "burn:" : kind === "lock" ? "lock:" : "pair:"
   return raw.startsWith(prefix) ? raw.slice(prefix.length) : raw
 }
 

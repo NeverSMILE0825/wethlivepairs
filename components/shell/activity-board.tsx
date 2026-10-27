@@ -119,7 +119,8 @@ function stored(key: string, fallback: string): string {
 function seriesModeFor(column: "pairs" | "burns"): SeriesMode {
   const fallback = column === "pairs" ? "pairs" : "burns"
   const saved = stored(column === "pairs" ? "weth-activity-series-pairs" : "weth-activity-series-burns", fallback)
-  return saved === "pairs" || saved === "burns" || saved === "both" ? saved : fallback
+  const allowed = column === "burns" ? saved === "locks" : false
+  return saved === "pairs" || saved === "burns" || saved === "both" || allowed ? saved : fallback
 }
 
 function chartRangeFor(column: "pairs" | "burns"): string {
@@ -185,9 +186,10 @@ function useBoardMarket(): MarketView {
   return view
 }
 
-function pairAndBurnTimes(snapshot: SnapshotFile | null, list: readonly ActivityItem[]): { pairs: number[]; burns: number[] } {
+function pairAndBurnTimes(snapshot: SnapshotFile | null, list: readonly ActivityItem[]): { pairs: number[]; burns: number[]; locks: number[] } {
   const pairs: { key: string; at: number }[] = []
   const burns: { key: string; at: number }[] = []
+  const locks: { key: string; at: number }[] = []
   for (const row of snapshot?.rows ?? []) {
     if (typeof row?.address !== "string" || typeof row.created_at !== "string") continue
     pairs.push({ key: canonicalActivityKey("pair", row.address), at: Date.parse(row.created_at) })
@@ -197,12 +199,17 @@ function pairAndBurnTimes(snapshot: SnapshotFile | null, list: readonly Activity
     if (typeof event?.id !== "string" || typeof at !== "string") continue
     burns.push({ key: canonicalActivityKey("burn", event.id), at: Date.parse(at) })
   }
+  for (const event of snapshot?.lpLocks ?? []) {
+    if (typeof event?.id !== "string" || typeof event.at !== "string") continue
+    locks.push({ key: canonicalActivityKey("lock", event.id), at: Date.parse(event.at) })
+  }
   for (const item of list) {
     const at = Date.parse(item.occurredAt)
     if (item.type === "new-pair" && item.pairAddress) pairs.push({ key: canonicalActivityKey("pair", item.pairAddress), at })
     if (item.type === "lp-burn" && item.activityId) burns.push({ key: canonicalActivityKey("burn", item.activityId), at })
+    if (item.type === "lp-lock" && item.activityId) locks.push({ key: canonicalActivityKey("lock", item.activityId), at })
   }
-  return { pairs: earliestTimes(pairs), burns: earliestTimes(burns) }
+  return { pairs: earliestTimes(pairs), burns: earliestTimes(burns), locks: earliestTimes(locks) }
 }
 
 function multiplesOf(rows: readonly PairRecord[], now: number): number[] {
@@ -366,6 +373,7 @@ function ActivityBoardBody({ snapshot, mode, onClose }: { snapshot: SnapshotFile
     const times = pairAndBurnTimes(snapshot, list)
     const pairStats = windowStats(times.pairs, now)
     const burnStats = windowStats(times.burns, now)
+    const lockStats = windowStats(times.locks, now)
     let tx1h = 0
     let txPrevious = 0
     const seen = new Set<string>()
@@ -426,6 +434,7 @@ function ActivityBoardBody({ snapshot, mode, onClose }: { snapshot: SnapshotFile
       times,
       pairStats,
       burnStats,
+      lockStats,
       tx1h,
       txPrevious,
       netWeth,
@@ -440,6 +449,7 @@ function ActivityBoardBody({ snapshot, mode, onClose }: { snapshot: SnapshotFile
       survival,
       pairLevel: activityState(pairStats[0].current, pairStats[0].previous, pairBaseline),
       burnLevel: activityState(burnStats[0].current, burnStats[0].previous, burnBaseline),
+      lockLevel: activityState(lockStats[0].current, lockStats[0].previous, null),
     }
     } catch {
       return null
@@ -762,7 +772,7 @@ function BoardColumn({
   feedSpanMs: number | null
   canRemove: boolean
   onRemove: () => void
-  pulse: { pairStats: WindowStat[]; burnStats: WindowStat[]; times: { pairs: number[]; burns: number[] }; pairLevel: ReturnType<typeof activityState>; burnLevel: ReturnType<typeof activityState> } | null
+  pulse: { pairStats: WindowStat[]; burnStats: WindowStat[]; lockStats: WindowStat[]; times: { pairs: number[]; burns: number[]; locks: number[] }; pairLevel: ReturnType<typeof activityState>; burnLevel: ReturnType<typeof activityState>; lockLevel: ReturnType<typeof activityState> } | null
   zone: string
   chartRangeId: string
   seriesMode: SeriesMode
@@ -808,8 +818,8 @@ function BoardColumn({
       {now != null && pulse && (id === "pairs" || id === "burns") ? (
         <ActivityMetricHeader
           title={id === "pairs" ? "Pairs" : securityMode === "locked" ? "LP locks" : "LP burns"}
-          stats={id === "pairs" ? pulse.pairStats : pulse.burnStats}
-          level={id === "pairs" ? pulse.pairLevel : pulse.burnLevel}
+          stats={id === "pairs" ? pulse.pairStats : securityMode === "locked" ? pulse.lockStats : pulse.burnStats}
+          level={id === "pairs" ? pulse.pairLevel : securityMode === "locked" ? pulse.lockLevel : pulse.burnLevel}
           open={chartOpen[id]}
           onToggle={() => onToggleChart(id)}
           range={chartRangeId}
@@ -817,8 +827,10 @@ function BoardColumn({
           onRange={onChartRange}
           series={seriesMode}
           onSeries={onSeries}
+          seriesOptions={id === "burns" ? ["pairs", "burns", "locks", "both"] : ["pairs", "burns", "both"]}
           pairBuckets={chartOpen[id] ? chartBuckets(pulse.times.pairs, now, chartRangeId) : []}
           burnBuckets={chartOpen[id] ? chartBuckets(pulse.times.burns, now, chartRangeId) : []}
+          lockBuckets={chartOpen[id] && id === "burns" ? chartBuckets(pulse.times.locks, now, chartRangeId) : []}
           zone={zone}
         />
       ) : null}

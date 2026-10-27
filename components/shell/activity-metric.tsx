@@ -6,10 +6,12 @@ import { ACTIVITY_LABEL, CONDITION_LABEL, formatCompact, formatDelta, formatInZo
 import { formatChange } from "@/lib/market/format"
 import { resolveZone } from "@/lib/types"
 
-export type SeriesMode = "pairs" | "burns" | "both"
+export type SeriesMode = "pairs" | "burns" | "locks" | "both"
 
 const PAIR = "#38bdf8"
 const BURN = "#fb923c"
+const LOCK = "#a78bfa"
+const SERIES_LABEL: Record<SeriesMode, string> = { pairs: "Pairs", burns: "LP burns", locks: "LP locks", both: "Both" }
 
 function tone(change: number | null): string {
   if (change == null || Math.abs(change) < 0.05) return "text-muted-foreground"
@@ -29,6 +31,8 @@ export function ActivityMetricHeader({
   onSeries,
   pairBuckets,
   burnBuckets,
+  lockBuckets = [],
+  seriesOptions = ["pairs", "burns", "both"],
   zone,
 }: {
   title: string
@@ -43,6 +47,8 @@ export function ActivityMetricHeader({
   onSeries: (mode: SeriesMode) => void
   pairBuckets: ActivityBucket[]
   burnBuckets: ActivityBucket[]
+  lockBuckets?: ActivityBucket[]
+  seriesOptions?: readonly SeriesMode[]
   zone: string
 }) {
   const headline = stats.find((item) => item.id === "24h")
@@ -73,15 +79,20 @@ export function ActivityMetricHeader({
                 {item.label}
               </button>
             ))}
-            <span className="mx-1 text-muted-foreground">·</span>
-            {(["pairs", "burns", "both"] as const).map((mode) => (
-              <button key={mode} type="button" aria-pressed={series === mode} onClick={() => onSeries(mode)} className={`rounded px-1.5 py-0.5 text-[10px] capitalize ${series === mode ? "bg-foreground text-background" : "text-muted-foreground"}`}>
-                {mode === "both" ? "Both" : mode === "pairs" ? "Pairs" : "LP burns"}
+            {seriesOptions.length <= 3 ? <span className="mx-1 text-muted-foreground">·</span> : <span className="basis-full" />}
+            {seriesOptions.map((mode) => (
+              <button key={mode} type="button" aria-pressed={series === mode} onClick={() => onSeries(mode)} className={`rounded px-1.5 py-0.5 text-[10px] ${series === mode ? "bg-foreground text-background" : "text-muted-foreground"}`}>
+                {SERIES_LABEL[mode]}
               </button>
             ))}
           </div>
           <ChartBoundary>
-            <HourlyActivityChart pairBuckets={series === "burns" ? [] : pairBuckets} burnBuckets={series === "pairs" ? [] : burnBuckets} zone={zone} />
+            <HourlyActivityChart
+              pairBuckets={series === "burns" || series === "locks" ? [] : pairBuckets}
+              burnBuckets={series === "pairs" || series === "locks" ? [] : burnBuckets}
+              lockBuckets={series === "locks" ? lockBuckets : []}
+              zone={zone}
+            />
           </ChartBoundary>
         </div>
       ) : null}
@@ -111,13 +122,14 @@ class ChartBoundary extends Component<{ children: ReactNode }, { failed: boolean
   }
 }
 
-export function HourlyActivityChart({ pairBuckets, burnBuckets, zone }: { pairBuckets: ActivityBucket[]; burnBuckets: ActivityBucket[]; zone: string }) {
+export function HourlyActivityChart({ pairBuckets, burnBuckets, lockBuckets = [], zone }: { pairBuckets: ActivityBucket[]; burnBuckets: ActivityBucket[]; lockBuckets?: ActivityBucket[]; zone: string }) {
   const [hover, setHover] = useState<number | null>(null)
-  const count = Math.max(pairBuckets.length, burnBuckets.length)
+  const count = Math.max(pairBuckets.length, burnBuckets.length, lockBuckets.length)
   if (count === 0 || count > 400) return <p className="py-3 text-[11px] text-muted-foreground">No buckets in this range.</p>
   let peak = 1
   for (const bucket of pairBuckets) if (bucket.count > peak) peak = bucket.count
   for (const bucket of burnBuckets) if (bucket.count > peak) peak = bucket.count
+  for (const bucket of lockBuckets) if (bucket.count > peak) peak = bucket.count
   const width = 320
   const height = 96
   const pad = 4
@@ -129,9 +141,13 @@ export function HourlyActivityChart({ pairBuckets, burnBuckets, zone }: { pairBu
   const index = hover ?? count - 1
   const pair = pairBuckets[index]
   const burn = burnBuckets[index]
-  const start = pair?.start ?? burn?.start
+  const lock = lockBuckets[index]
+  const drawn = [pairBuckets, burnBuckets, lockBuckets].filter((buckets) => buckets.length > 0)
+  const start = pair?.start ?? burn?.start ?? lock?.start
   const labelAt = (bucket: ActivityBucket | undefined) => bucket ? formatInZone(bucket.start, zone, { month: "short", day: "numeric", hour: "numeric" }) : ""
   const ticks = [0, Math.floor(count / 2), count - 1].filter((item, pos, list) => list.indexOf(item) === pos)
+  const bar = drawn.length > 1 ? slot * 0.28 : slot * 0.62
+  const origin = (ordinal: number) => pad + (drawn.length > 1 ? slot * (0.08 + ordinal * 0.32) : slot * 0.16)
   return (
     <div>
       <svg viewBox={`0 0 ${width} ${height}`} className="h-24 w-full" role="img" aria-label="Activity by hour" onMouseLeave={() => setHover(null)} onMouseMove={(event) => {
@@ -140,28 +156,36 @@ export function HourlyActivityChart({ pairBuckets, burnBuckets, zone }: { pairBu
         setHover(Math.max(0, Math.min(count - 1, Math.floor((x - pad) / slot))))
       }}>
         {Array.from({ length: count }, (_, item) => {
-          const pairCount = pairBuckets[item]?.count ?? 0
-          const burnCount = burnBuckets[item]?.count ?? 0
-          const both = pairBuckets.length > 0 && burnBuckets.length > 0
-          const bar = both ? slot * 0.32 : slot * 0.62
           const base = height - 16
+          let ordinal = 0
+          const rects: { key: string; count: number; color: string }[] = []
+          if (pairBuckets.length > 0) rects.push({ key: "pairs", count: pairBuckets[item]?.count ?? 0, color: PAIR })
+          if (burnBuckets.length > 0) rects.push({ key: "burns", count: burnBuckets[item]?.count ?? 0, color: BURN })
+          if (lockBuckets.length > 0) rects.push({ key: "locks", count: lockBuckets[item]?.count ?? 0, color: LOCK })
           return (
             <g key={item}>
-              {pairBuckets.length > 0 ? <rect x={pad + item * slot + (both ? slot * 0.12 : slot * 0.16)} y={yAt(pairCount)} width={bar} height={Math.max(0, base - yAt(pairCount))} fill={PAIR} /> : null}
-              {burnBuckets.length > 0 ? <rect x={pad + item * slot + (both ? slot * 0.5 : slot * 0.16)} y={yAt(burnCount)} width={bar} height={Math.max(0, base - yAt(burnCount))} fill={BURN} /> : null}
+              {rects.map((entry) => {
+                const x = origin(ordinal)
+                ordinal += 1
+                return <rect key={entry.key} x={x + item * slot} y={yAt(entry.count)} width={bar} height={Math.max(0, base - yAt(entry.count))} fill={entry.color} />
+              })}
             </g>
           )
         })}
-        {ticks.map((item) => (
-          <text key={item} x={pad + item * slot} y={height - 2} fill="currentColor" fontSize="8">
-            {pairBuckets[item] || burnBuckets[item] ? formatInZone((pairBuckets[item] ?? burnBuckets[item]).start, zone, { hour: "numeric" }) : ""}
-          </text>
-        ))}
+        {ticks.map((item) => {
+          const bucket = pairBuckets[item] ?? burnBuckets[item] ?? lockBuckets[item]
+          return (
+            <text key={item} x={pad + item * slot} y={height - 2} fill="currentColor" fontSize="8">
+              {bucket ? formatInZone(bucket.start, zone, { hour: "numeric" }) : ""}
+            </text>
+          )
+        })}
       </svg>
       <p className="text-[10px] leading-4 text-muted-foreground tabular-nums">
-        {start != null ? labelAt(pair ?? burn) : ""}
+        {start != null ? labelAt(pair ?? burn ?? lock) : ""}
         {pairBuckets.length > 0 ? ` · Pairs ${pair?.count ?? 0}${pair?.change == null ? "" : ` (${pair.change > 0 ? "+" : ""}${Math.round(pair.change * 10) / 10}% vs previous)`}` : ""}
         {burnBuckets.length > 0 ? ` · LP burns ${burn?.count ?? 0}` : ""}
+        {lockBuckets.length > 0 ? ` · LP locks ${lock?.count ?? 0}${lock?.change == null ? "" : ` (${lock.change > 0 ? "+" : ""}${Math.round(lock.change * 10) / 10}% vs previous)`}` : ""}
       </p>
     </div>
   )
