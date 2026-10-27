@@ -119,8 +119,9 @@ function stored(key: string, fallback: string): string {
 function seriesModeFor(column: "pairs" | "burns"): SeriesMode {
   const fallback = column === "pairs" ? "pairs" : "burns"
   const saved = stored(column === "pairs" ? "weth-activity-series-pairs" : "weth-activity-series-burns", fallback)
-  const allowed = column === "burns" ? saved === "locks" : false
-  return saved === "pairs" || saved === "burns" || saved === "both" || allowed ? saved : fallback
+  if (saved === "pairs" || saved === "burns" || saved === "both") return saved
+  if (column === "burns" && saved === "locks") return "locks"
+  return fallback
 }
 
 function chartRangeFor(column: "pairs" | "burns"): string {
