@@ -13,6 +13,7 @@ import { captureHistory } from "../lib/narrative/engine"
 import { fetchNews } from "../lib/narrative/rss"
 import type { HistoryPoint, SnapshotFile } from "../lib/narrative/types"
 import { scanChain } from "../lib/lp/chain-scan"
+import { knownPairs, loadRecentLocks, publicRpc } from "../lib/lp/lock-feed"
 import { applyChainBurns, buildLpBurns } from "../lib/lp/monitor"
 import { HISTORY_RETAIN_MS, HISTORY_SCOPE, mergeRecords, openHistoryJob } from "../lib/history/plan"
 import { enrichIdentity, readHead, scanHistoricalBurns, scanHistoricalPairs } from "../lib/history/scan"
@@ -102,6 +103,29 @@ async function main() {
     console.warn(`[HISTORY] Backfill paused. Live snapshot still publishes. ${error instanceof Error ? error.message : "unknown error"}`)
   }
   const withChain = applyChainBurns(historicalRows, historicalBurns)
+  let lpLocks: NonNullable<SnapshotFile["lpLocks"]> = []
+  try {
+    const found = await loadRecentLocks(publicRpc, knownPairs(withChain))
+    lpLocks = found.map(({ lock, at, symbol, name, createdAt }) => ({
+      id: lock.id,
+      at,
+      pair: lock.pair,
+      token: lock.token,
+      exchange: lock.exchange,
+      symbol,
+      name,
+      locker: lock.locker.name,
+      positionId: lock.positionId,
+      percent: lock.percent,
+      unlockAt: lock.unlockAt == null ? null : new Date(lock.unlockAt).toISOString(),
+      tx: lock.tx,
+      feeBps: lock.feeBps,
+      createdAt,
+    }))
+    console.log(`[LP-LOCK] ${lpLocks.length} active WETH locks from verified lockers`)
+  } catch (error) {
+    console.warn(`[LP-LOCK] Lock scan skipped. ${error instanceof Error ? error.message : "unknown error"}`)
+  }
   const history = trimHistory([...(previous?.history ?? []), captureHistory(withChain, generatedAt)], generatedMs)
   const lp = buildLpBurns(withChain, previous, generatedAt, historicalBurns)
   for (const event of lp.events.filter((event) => event.kind === "newly-burned" && event.detectedAt === generatedAt)) {
@@ -115,6 +139,7 @@ async function main() {
     news,
     history,
     lpBurns: lp.events,
+    lpLocks,
     lpScan: lp.scan,
     chain,
     backfill,

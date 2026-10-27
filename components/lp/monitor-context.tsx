@@ -4,7 +4,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { publishActivity } from "@/lib/activity/bus"
 import { createAudioContext, notificationState, playNamedTone, requestNotifications } from "@/lib/alerts"
 import { freshLiveAlerts, isLiveBurnAlert, notificationCopy, passesNotifyFilter } from "@/lib/lp/burn-logic"
-import { lockFromMessage, liveLockFilter } from "@/lib/lp/lock-logic"
+import { knownPairs, loadRecentLocks } from "@/lib/lp/lock-feed"
+import { liveLockFilter, lockerLogFromMessage, resolveLock, type LockerLog } from "@/lib/lp/lock-logic"
 import { LIVE_HEADS_URL, liveLogFilter, livePairFilter, liveBurnEvent, recordFromPairSighting, sightingFromMessage } from "@/lib/lp/live-feed"
 import type { ParsedTransfer } from "@/lib/lp/burn-logic"
 import type { PairRecord } from "@/lib/types"
@@ -299,12 +300,53 @@ export function LpMonitor({ children }: { children: ReactNode }) {
         if (!closed) setSocket("error")
         return
       }
+      let rpcId = 10
+      const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
+      const rpc = (method: string, params: unknown[]) => new Promise<unknown>((resolve, reject) => {
+        const id = rpcId
+        rpcId += 1
+        const timer = window.setTimeout(() => {
+          pending.delete(id)
+          reject(new Error("timeout"))
+        }, 20_000)
+        pending.set(id, {
+          resolve: (value) => { window.clearTimeout(timer); resolve(value) },
+          reject: (error) => { window.clearTimeout(timer); reject(error) },
+        })
+        try {
+          ws?.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }))
+        } catch (error) {
+          window.clearTimeout(timer)
+          pending.delete(id)
+          reject(error instanceof Error ? error : new Error("RPC send failed"))
+        }
+      })
+      const call = async (to: string, data: string) => {
+        const result = await rpc("eth_call", [{ to, data }, "latest"])
+        return typeof result === "string" ? result : null
+      }
+      const publishLock = async (log: LockerLog, at?: string) => {
+        const known = knownPairs([...pairsRef.current.values()])
+        const lock = await resolveLock(log, call, known)
+        if (!lock || closed) return
+        const record = lock.pair ? pairsRef.current.get(lock.pair) ?? null : null
+        publishActivity({ type: "lock", lock, record, at: at ?? new Date().toISOString(), symbol: record?.symbol || known.get(lock.pair ?? "")?.symbol || undefined, name: record?.tokenName || record?.name || known.get(lock.pair ?? "")?.name || undefined })
+      }
       ws.onopen = () => {
         ws?.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_subscribe", params: ["newHeads"] }))
         ws?.send(JSON.stringify(liveLogFilter()))
         ws?.send(JSON.stringify(liveLockFilter()))
         ws?.send(JSON.stringify(livePairFilter()))
         if (!closed) setSocket("open")
+        void loadRecentLocks(rpc, knownPairs([...pairsRef.current.values()]), () => closed).then((found) => {
+          if (closed) return
+          for (const item of found) {
+            const record = item.lock.pair ? pairsRef.current.get(item.lock.pair) ?? null : null
+            publishActivity({ type: "lock", lock: item.lock, record, at: item.at, symbol: item.symbol || record?.symbol || undefined, name: item.name || record?.tokenName || record?.name || undefined })
+          }
+        }).catch((error: unknown) => {
+          console.warn(`[LP-LOCK] Recent lock read failed. ${error instanceof Error ? error.message : "unknown error"}`)
+        })
       }
       ws.onmessage = (event) => {
         let message: unknown
@@ -313,14 +355,22 @@ export function LpMonitor({ children }: { children: ReactNode }) {
         } catch {
           return
         }
+        const response = message as { id?: number; result?: unknown; error?: { message?: string } }
+        if (typeof response.id === "number" && pending.has(response.id)) {
+          const waiter = pending.get(response.id)
+          pending.delete(response.id)
+          if (response.error) waiter?.reject(new Error(response.error.message || "RPC error"))
+          else waiter?.resolve(response.result)
+          return
+        }
         const hex = (message as { params?: { result?: { number?: string } } }).params?.result?.number
         if (typeof hex === "string" && !closed) setBlock(Number.parseInt(hex, 16))
         const sighting = sightingFromMessage(message, new Set(pairsRef.current.keys()))
         if (closed) return
         if (!sighting) {
-          const lock = lockFromMessage(message)
-          if (!lock) return
-          publishActivity({ type: "lock", lock, record: pairsRef.current.get(lock.pair) ?? null, at: new Date().toISOString() })
+          const log = lockerLogFromMessage(message)
+          if (!log || log.action === "withdraw") return
+          void publishLock(log)
           return
         }
         if (sighting.type === "pair") {

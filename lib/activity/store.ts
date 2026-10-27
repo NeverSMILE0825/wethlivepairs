@@ -41,6 +41,8 @@ export type ActivityItem = {
   title: string | null
   detail: string | null
   href: string
+  /** Uniswap fee in hundredths of a bip, when the pool records one. */
+  feeBps?: number | null
   /** From the realtime feed rather than the published snapshot. */
   live: boolean
   /** Local time this card first appeared, for the arrival highlight. */
@@ -138,18 +140,20 @@ export function pairActivity(record: PairRecord, live: boolean): ActivityInput {
   }
 }
 
-export function lockActivity(input: { id: string; at: string; pair: string; token: string | null; exchange: string | null; symbol: string; name: string; detail: string; href: string; live: boolean }): ActivityInput {
+export function lockActivity(input: { id: string; at: string; pair: string | null; token: string | null; exchange: string | null; symbol: string; name: string; detail: string; href: string; live: boolean; feeBps?: number | null; createdAt?: string | null }): ActivityInput {
   const token = text(input.token).toLowerCase()
+  const pair = text(input.pair).toLowerCase()
   return {
     activityId: `lock:${input.id}`,
     type: "lp-lock",
     occurredAt: input.at,
     tokenAddress: token || null,
-    pairAddress: text(input.pair).toLowerCase(),
+    pairAddress: pair || null,
     exchange: input.exchange,
+    feeBps: input.feeBps ?? null,
     name: input.name,
     symbol: input.symbol,
-    pairCreatedAt: null,
+    pairCreatedAt: input.createdAt ?? null,
     lpBurnPercent: null,
     title: "LP lock",
     detail: input.detail,

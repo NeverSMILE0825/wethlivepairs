@@ -50,6 +50,23 @@ export type SnapshotFile = {
   news?: NewsItem[]
   history?: HistoryPoint[]
   lpBurns?: LpBurnEvent[]
+  /** Active liquidity locks read from verified locker contracts. */
+  lpLocks?: {
+    id: string
+    at: string
+    pair: string | null
+    token: string | null
+    exchange: string
+    symbol: string
+    name: string
+    locker: string
+    positionId: string | null
+    percent: number | null
+    unlockAt: string | null
+    tx: string
+    feeBps: number | null
+    createdAt: string | null
+  }[]
   lpScan?: LpScan
   chain?: ChainCheckpoint
   backfill?: BackfillState

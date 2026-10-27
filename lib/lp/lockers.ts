@@ -1,6 +1,7 @@
 /**
  * Verified liquidity lockers only. A contract is not a locker because its name contains "lock".
- * V3 and V4 locker addresses stay out until their source page and explorer name are both confirmed.
+ * Team Finance locks V2 LP tokens and V3/V4 position NFTs in this one contract.
+ * UNCX entries are the fungible V2 lockers named in the UNCX docs.
  */
 
 export type LockerCapability = "restricted-until-unlock" | "restricted" | "allowed" | "supported" | "unknown"
@@ -24,7 +25,7 @@ export const LOCKER_REGISTRY: readonly LockerProvider[] = [
     id: "team-finance",
     name: "Team Finance",
     chainId: 1,
-    versions: ["v2"],
+    versions: ["v2", "v3", "v4"],
     address: "0xe2fe530c047f2d85298b07d9333c05737f1435fb",
     source: "Etherscan public name tag: TrustSwap: Team Finance Lock",
     enabled: true,

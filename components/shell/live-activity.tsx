@@ -212,7 +212,7 @@ function TokenBody({ item, now }: { item: ActivityItem; now: number | null }) {
   const pairAge = typeof item.pairCreatedAt === "string" && now != null ? now - Date.parse(item.pairCreatedAt) : NaN
   return (
     <>
-      <p className="mt-1.5 flex items-center gap-1.5 truncate text-sm font-semibold" title={`${symbol} / WETH`}><span className="truncate">{symbol} <span className="font-normal text-muted-foreground">/ WETH</span></span><ProtocolBadge exchange={item.exchange} /></p>
+      <p className="mt-1.5 flex items-center gap-1.5 truncate text-sm font-semibold" title={`${symbol} / WETH`}><span className="truncate">{symbol} <span className="font-normal text-muted-foreground">/ WETH</span></span><ProtocolBadge exchange={item.exchange} feeBps={item.feeBps} /></p>
       <p className="truncate text-xs text-muted-foreground">{typeof item.symbol === "string" && item.symbol ? `$${item.symbol.replace(/^\$/, "")}` : "Identity loading…"}{name && name !== symbol ? ` · ${name}` : ""}</p>
       {item.type === "lp-lock" && item.detail ? <p className="mt-1 text-xs text-muted-foreground">{item.detail}</p> : null}
       {item.type === "lp-burn" ? (

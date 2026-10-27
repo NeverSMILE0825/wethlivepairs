@@ -1,43 +1,56 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { TRANSFER_TOPIC } from "./burn-logic"
-import { concentratedLock, formatDuration, fungiblePercents, liveLockFilter, lockFromMessage, lockState, nextUnlock } from "./lock-logic"
+import { concentratedLock, decodeV3Position, foldLockerLogs, formatDuration, fungiblePercents, liveLockFilter, lockState, nextUnlock, parseLockerLog, wethToken, type LockerLog } from "./lock-logic"
 import { lockerByAddress } from "./lockers"
 
 const TEAM = "0xe2fe530c047f2d85298b07d9333c05737f1435fb"
 const RANDOM = "0x2222222222222222222222222222222222222222"
-const PAIR = "0x1111111111111111111111111111111111111111"
 const HOLDER = "0x3333333333333333333333333333333333333333"
+
+const DEPOSIT_NFT = "0x8ada5a61cb829cf6dd4a74752fd8a7524261a767c2c80ee9398343e2063ef144"
+const MANAGER = "0xc36442b4a4522e871399cd717abdd847ab11fe88"
 
 function topic(address: string): string {
   return `0x${address.slice(2).padStart(64, "0")}`
 }
 
-function transfer(to: string, amount: bigint, position = false) {
-  return {
-    params: {
-      result: {
-        address: PAIR,
-        topics: [TRANSFER_TOPIC, topic(HOLDER), topic(to), ...(position ? [topic("0x00000000000000000000000000000000000000c8")] : [])],
-        data: position ? "0x" : `0x${amount.toString(16).padStart(64, "0")}`,
-        blockNumber: "0x10",
-        transactionHash: `0x${"ab".repeat(32)}`,
-        logIndex: "0x1",
-      },
-    },
-  }
+function word(value: bigint | number): string {
+  return BigInt(value).toString(16).padStart(64, "0")
 }
 
-test("a V2 transfer into Team Finance is a lock, and a random contract is not", () => {
+function depositNft(id: number, tokenId: number): LockerLog | null {
+  return parseLockerLog({
+    address: TEAM,
+    topics: [DEPOSIT_NFT, topic(MANAGER), topic(HOLDER)],
+    data: `0x${word(id)}${word(tokenId)}${word(1)}${word(1_795_822_875)}`,
+    blockNumber: "0x10",
+    transactionHash: `0x${"ab".repeat(32)}`,
+    logIndex: "0x1",
+  })
+}
+
+test("a Team Finance position deposit is a lock, and a random contract is not", () => {
   assert.equal(lockerByAddress(TEAM)?.name, "Team Finance")
   assert.equal(lockerByAddress(RANDOM), null)
-  const lock = lockFromMessage(transfer(TEAM, BigInt(99000)))
+  const lock = depositNft(24560, 86889)
   assert.equal(lock?.locker.name, "Team Finance")
-  assert.equal(lock?.amount, BigInt(99000))
-  assert.equal(lockFromMessage(transfer(RANDOM, BigInt(99000))), null)
-  const recipients = (liveLockFilter().params[1] as { topics: [string, null, string[]] }).topics[2]
-  assert.ok(recipients.some((item) => item.endsWith(TEAM.slice(2))))
-  assert.ok(!recipients.some((item) => item.endsWith(RANDOM.slice(2))))
+  assert.equal(lock?.tokenId, "86889")
+  assert.equal(lock?.action, "lock")
+  assert.equal(lock?.unlockAt, 1_795_822_875_000)
+  assert.equal(parseLockerLog({ address: RANDOM, topics: [DEPOSIT_NFT, topic(MANAGER), topic(HOLDER)], data: "0x", blockNumber: "0x10", transactionHash: `0x${"ab".repeat(32)}`, logIndex: "0x1" }), null)
+  const filter = liveLockFilter().params[1] as { address: string[]; topics: string[][] }
+  assert.ok(filter.address.includes(TEAM))
+  assert.ok(!filter.address.includes(RANDOM))
+  assert.ok(filter.topics[0].includes(DEPOSIT_NFT))
+})
+
+test("a withdrawal removes the lock and does not invent one", () => {
+  const deposit = depositNft(10, 200)
+  assert.ok(deposit)
+  const withdrawn: LockerLog = { ...deposit, action: "withdraw", amount: BigInt(0), block: 20 }
+  assert.equal(foldLockerLogs([deposit, withdrawn]).length, 0)
+  assert.equal(foldLockerLogs([withdrawn]).length, 0)
+  assert.equal(foldLockerLogs([deposit]).length, 1)
 })
 
 test("burned and locked percentages stay separate, including a partial lock", () => {
@@ -55,8 +68,10 @@ test("one locked V3 position is not reported as the whole pool", () => {
   assert.equal(locked.poolWidePercent, null)
   assert.deepEqual(concentratedLock({ custodianIsLocker: true, poolMatches: false, managerMatches: true }), { positionPercent: null, poolWidePercent: null })
   assert.deepEqual(concentratedLock({ custodianIsLocker: true, poolMatches: true, managerMatches: false }), { positionPercent: null, poolWidePercent: null })
-  const nft = lockFromMessage(transfer(TEAM, BigInt(0), true))
-  assert.equal(nft?.positionId, "200")
+  const position = decodeV3Position(`0x${word(0)}${word(0)}${topic("0xc011a73ee8576fb46f5e1c5751ca3b9fe0af2a6f").slice(2)}${topic("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").slice(2)}${word(3000)}${word(0)}${word(0)}${word(1)}`)
+  assert.equal(position?.fee, 3000)
+  assert.equal(wethToken(position?.token0 ?? "", position?.token1 ?? ""), "0xc011a73ee8576fb46f5e1c5751ca3b9fe0af2a6f")
+  assert.equal(wethToken("0x1111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222"), null)
 })
 
 test("an expired lock stays withdrawable until a withdrawal is observed", () => {

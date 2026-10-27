@@ -253,11 +253,29 @@ function snapshotFeed(id: BoardColumnId, snapshot: SnapshotFile | null, now: num
         .filter((event) => event && (typeof event.burnAt === "string" || typeof event.detectedAt === "string"))
         .map((event) => asItem(burnActivity(event, false)))
         .filter((item) => within(item.occurredAt))
-      const locks = (snapshot.rows ?? [])
-        .filter((row) => row && row.lpStatus === "locked")
+      const locks = (snapshot.lpLocks ?? [])
+        .filter((event) => event && typeof event.at === "string" && typeof event.id === "string")
+        .map((event) => asItem(lockActivity({
+          id: event.id,
+          at: event.at,
+          pair: event.pair,
+          token: event.token,
+          exchange: event.exchange,
+          symbol: event.symbol,
+          name: event.name,
+          detail: [event.locker, event.positionId ? `Position #${event.positionId}` : "LP token", event.positionId ? "100% of this position" : event.percent == null ? "Pool-wide locked N/A" : `${event.percent}% locked`, event.unlockAt ? `Unlock ${event.unlockAt}` : "Unlock unknown"].join(" · "),
+          href: event.token ? `/tokens/${event.token}` : event.tx ? `https://etherscan.io/tx/${event.tx}` : "/",
+          live: false,
+          feeBps: event.feeBps,
+          createdAt: event.createdAt,
+        })))
+        .filter((item) => within(item.occurredAt))
+      const seen = new Set(locks.map((item) => item.pairAddress).filter((item): item is string => item != null))
+      const recorded = (snapshot.rows ?? [])
+        .filter((row) => row && row.lpStatus === "locked" && !seen.has(row.address.toLowerCase()))
         .map((row) => asItem(lockActivity({
           id: row.address.toLowerCase(),
-          at: "",
+          at: row.created_at,
           pair: row.address,
           token: row.tokenAddress,
           exchange: row.exchange,
@@ -268,7 +286,7 @@ function snapshotFeed(id: BoardColumnId, snapshot: SnapshotFile | null, now: num
           live: false,
         })))
         .filter((item) => within(item.occurredAt))
-      return [...burns, ...locks].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)).slice(0, SNAPSHOT_BURNS)
+      return [...burns.slice(0, SNAPSHOT_BURNS), ...locks, ...recorded].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
     }
     if (id === "news" || id === "trends") {
       const kind = id === "news" ? "news" : "trend"

@@ -5,7 +5,7 @@ import type { PairRecord } from "@/lib/types"
 export type ActivitySighting =
   | { type: "pair"; record: PairRecord; token0: string | null }
   | { type: "burn"; event: LpBurnEvent }
-  | { type: "lock"; lock: LockSighting; record: PairRecord | null; at: string }
+  | { type: "lock"; lock: LockSighting; record: PairRecord | null; at: string; symbol?: string; name?: string }
   | { type: "head"; block: number }
 
 type Listener = (sighting: ActivitySighting) => void
