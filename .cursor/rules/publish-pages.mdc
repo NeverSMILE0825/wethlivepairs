@@ -3,4 +3,4 @@ description: Push codebase updates to GitHub and publish GitHub Pages
 alwaysApply: true
 ---
 
-After changing this codebase, commit the updates, push them to the GitHub repo, and wait until the GitHub Pages workflow succeeds. Confirm https://wethlivepairs.site/ is serving the new version before finishing.
+After changing this codebase, commit the updates and push them to origin, https://github.com/NeverSMILE0825/wethlivepairs.git, using the stored NeverSMILE0825 credential. Wait until the GitHub Pages workflow succeeds. The published site is https://neversmile0825.github.io/wethlivepairs/ . https://wethlivepairs.site/ stays reserved by the suspended JackMiller825 account until that domain verification is moved, so do not treat a failure there as a failed publish.

@@ -182,7 +182,8 @@ export function LpMonitor({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!ready || !window.isSecureContext || !("serviceWorker" in navigator)) return
-    void navigator.serviceWorker.register("/sw.js").catch(() => {
+    const base = process.env.NEXT_PUBLIC_BASE_PATH ?? ""
+    void navigator.serviceWorker.register(`${base}/sw.js`).catch(() => {
       setDeliveryNote("The notification service worker did not register.")
     })
   }, [ready])

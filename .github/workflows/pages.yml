@@ -47,6 +47,7 @@ jobs:
         env:
           PAGES_EXPORT: "1"
           NEXT_PUBLIC_PAGES: "1"
+          PAGES_BASE: "/wethlivepairs"
         run: |
           rm -rf app/api
           npm run build
