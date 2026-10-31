@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import Link from "next/link"
 import { buildIntelligence } from "@/lib/narrative/engine"
 import { formatUsd } from "@/lib/format"
-import { formatCreated } from "@/lib/types"
+import { formatCreated, quoteLabel } from "@/lib/types"
 import { useSnapshot } from "@/components/trends/use-intel"
 import { DataGate, PageFrame } from "@/components/trends/widgets"
 import type { TokenAnalysis } from "@/lib/narrative/types"
@@ -49,7 +49,7 @@ export function TokensView() {
       {preview ? (
         <aside className="fixed inset-y-0 right-0 z-40 flex w-full max-w-sm flex-col gap-3 overflow-auto border-l border-foreground/10 bg-popover p-5" role="dialog" aria-label={`${preview.symbol} preview`}>
           <button type="button" className="self-end text-xs text-muted-foreground" onClick={() => setPreview(null)}>Close</button>
-          <h2 className="text-xl font-semibold">{preview.symbol} / WETH</h2>
+          <h2 className="text-xl font-semibold">{preview.symbol} / {quoteLabel(preview.quote)}</h2>
           <p className="text-sm text-muted-foreground">{preview.tokenName}</p>
           <p className="text-sm">Launched {formatCreated(preview.createdAt, "local")}</p>
           <p className="text-sm">Liquidity {formatUsd(preview.liquidity)}</p>

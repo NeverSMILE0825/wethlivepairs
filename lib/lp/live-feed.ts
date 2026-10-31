@@ -1,4 +1,4 @@
-import { FACTORIES, PAIR_CREATED_TOPIC, POOL_CREATED_TOPIC, V4_INITIALIZE_TOPIC, parsePairCreated, wethSide, dexForFactory } from "@/lib/history/plan"
+import { FACTORIES, PAIR_CREATED_TOPIC, POOL_CREATED_TOPIC, V4_INITIALIZE_TOPIC, parsePairCreated, quoteSide, dexForFactory, type QuoteAsset } from "@/lib/history/plan"
 import { TRANSFER_TOPIC, classifyLpTransfer, parseTransferLog, type ParsedTransfer, type TransferLog } from "@/lib/lp/burn-logic"
 import { burnEventId, type LpBurnEvent } from "@/lib/lp/monitor"
 import { parseIdentity } from "@/lib/narrative/text"
@@ -28,7 +28,7 @@ export function livePairFilter() {
 }
 
 export type LiveSighting =
-  | { type: "pair"; pair: string; token: string; dex: string; block: number }
+  | { type: "pair"; pair: string; token: string; token0: string; dex: string; block: number; quote: QuoteAsset }
   | { type: "burn"; transfer: ParsedTransfer; known: boolean }
 
 /** Pull a log out of an eth_subscription message. Ignores heads and subscribe acks. */
@@ -38,10 +38,10 @@ export function sightingFromMessage(payload: unknown, pairs: ReadonlySet<string>
   if (!result || !Array.isArray(result.topics)) return null
   const created = parsePairCreated(result)
   if (created) {
-    const side = wethSide(created.token0, created.token1)
     const dex = dexForFactory(created.factory)
+    const side = quoteSide(created.token0, created.token1, dex)
     if (!side || !dex) return null
-    return { type: "pair", pair: created.pair, token: side.token, dex, block: created.block }
+    return { type: "pair", pair: created.pair, token: side.token, token0: created.token0, dex, block: created.block, quote: side.quote }
   }
   const transfer = parseTransferLog(result)
   if (!transfer || classifyLpTransfer(transfer) !== "irreversible-burn") return null
@@ -50,7 +50,7 @@ export function sightingFromMessage(payload: unknown, pairs: ReadonlySet<string>
 
 export function recordFromPairSighting(sighting: Extract<LiveSighting, { type: "pair" }>, seenAt: string): PairRecord {
   return {
-    name: "WETH pair",
+    name: sighting.quote === "eth" ? "ETH pair" : "WETH pair",
     created_at: seenAt,
     exchange: sighting.dex,
     address: sighting.pair,
@@ -60,6 +60,7 @@ export function recordFromPairSighting(sighting: Extract<LiveSighting, { type: "
     remaining: null,
     remainingUnit: "",
     listingLiquidity: null,
+    quote: sighting.quote,
     ...EMPTY_DETAIL,
     creationBlock: sighting.block,
     listingSource: "ethereum-pair-created",

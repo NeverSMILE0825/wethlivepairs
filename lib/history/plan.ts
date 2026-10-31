@@ -9,11 +9,11 @@ export const HISTORY_CHUNK = 40
 export const HISTORY_BUDGET_MS = 18 * 60 * 1000
 /** Blocks left unscanned at the chain head so a short reorg can still be replayed. */
 export const HEAD_REORG_BLOCKS = 12
-/** Pair jobs saved before this did not read Uniswap V4. They are scanned once more. */
-export const PAIR_COVERAGE = 2
+/** Pair jobs saved before this kept only WETH quotes. They are scanned once more so Uniswap V4 native ETH is included. */
+export const PAIR_COVERAGE = 3
 
 export const HISTORY_SCOPE =
-  "Pair counts use the pair creation time. The DEXTools live listing currently returns about six hours. Uniswap V2, Uniswap V3, Uniswap V4, and SushiSwap are read from Ethereum through the newest settled block, so 6h, 12h, and 24h are not limited to that listing. A count stays partial only while that backfill is still walking those blocks."
+  "Pair counts use the pair creation time. The DEXTools live listing currently returns about six hours. Uniswap V2, Uniswap V3, Uniswap V4, and SushiSwap are read from Ethereum through the newest settled block, so 6h, 12h, and 24h are not limited to that listing. Uniswap V4 also keeps a pool when one currency is native ETH, the zero address, instead of WETH. A count stays partial only while that backfill is still walking those blocks."
 
 export const PAIR_CREATED_TOPIC = "0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9"
 /** Uniswap V3 Factory PoolCreated. Confirmed against mainnet pool 0x3447ecee797ad95c9b87c6a84e9c39422622ee22. */
@@ -21,6 +21,8 @@ export const POOL_CREATED_TOPIC = "0x783cca1c0412dd0d695e784568c96da2e9c22ff9893
 /** Uniswap V4 PoolManager Initialize. Confirmed against pool id 0xb864cca26ea3881d4483316bd8ed459e837b67c8fb7e167d5f9e60d41dd3c9c3. */
 export const V4_INITIALIZE_TOPIC = "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438"
 export const WETH = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+/** Uniswap V4 Currency for native ETH. It is not an ERC-20, and V2 and V3 cannot use it as a pair token. */
+export const NATIVE_ETH = "0x0000000000000000000000000000000000000000"
 
 export const FACTORIES = [
   { address: "0x5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f", dex: "Uniswap V2" },
@@ -51,7 +53,7 @@ export type HistoryJob = {
   startedAt: string
   updatedAt: string
   error: string | null
-  /** Pair scans at PAIR_COVERAGE include Uniswap V4. Older saved jobs omit it. */
+  /** Pair scans at PAIR_COVERAGE include Uniswap V4 native ETH. Older saved jobs omit it. */
   coverage?: number
 }
 
@@ -133,7 +135,7 @@ export function openHistoryJob(id: HistoryJob["id"], head: number, nowIso: strin
   return {
     id,
     status: blocksTotal === 0 ? "completed" : "running",
-    stage: blocksTotal === 0 ? "No historical blocks to scan" : "Scanning Ethereum for WETH pairs",
+    stage: blocksTotal === 0 ? "No historical blocks to scan" : "Scanning Ethereum for WETH and V4 native ETH pairs",
     phase: blocksTotal === 0 ? "done" : "recent",
     requestedDays: HISTORY_DAYS,
     recentStart,
@@ -227,12 +229,29 @@ export function parsePairCreated(log: { address?: string; topics?: string[]; dat
   return { factory, token0, token1, pair, block }
 }
 
-export function wethSide(token0: string, token1: string): { weth: "token0" | "token1"; token: string } | null {
+export type QuoteAsset = "eth" | "weth"
+
+/**
+ * The non-quote token in a pool. WETH counts on every factory.
+ * Native ETH counts only for Uniswap V4, where address zero is a real currency.
+ * A V4 pool of native ETH and WETH is reported as WETH quoted in native ETH.
+ */
+export function quoteSide(token0: string, token1: string, dex: string | null | undefined): { side: "token0" | "token1"; token: string; quote: QuoteAsset } | null {
   const left = token0.toLowerCase()
   const right = token1.toLowerCase()
-  if (left === WETH) return { weth: "token0", token: right }
-  if (right === WETH) return { weth: "token1", token: left }
+  if (dex === "Uniswap V4") {
+    if (left === NATIVE_ETH && right !== NATIVE_ETH) return { side: "token0", token: right, quote: "eth" }
+    if (right === NATIVE_ETH && left !== NATIVE_ETH) return { side: "token1", token: left, quote: "eth" }
+  }
+  if (left === WETH) return { side: "token0", token: right, quote: "weth" }
+  if (right === WETH) return { side: "token1", token: left, quote: "weth" }
   return null
+}
+
+export function wethSide(token0: string, token1: string): { weth: "token0" | "token1"; token: string } | null {
+  const side = quoteSide(token0, token1, null)
+  if (!side) return null
+  return { weth: side.side, token: side.token }
 }
 
 /** First row wins, so a live listing is kept when a backfill sees the same pair. */
@@ -314,7 +333,7 @@ export function comparisonReady(oldestAt: number | null, range: string, now: num
 export function coverageText(oldestAt: number | null, requestedMs: number, job: HistoryJob | null | undefined, now: number): string | null {
   if (job?.status === "completed") {
     if (oldestAt != null && now - oldestAt + 60_000 < requestedMs) {
-      return `This range asks for ${formatSpan(requestedMs)}. The oldest stored record is ${formatSpan(now - oldestAt)} old. There is no older pair inside the Uniswap V2, Uniswap V3, and SushiSwap backfill.`
+      return `This range asks for ${formatSpan(requestedMs)}. The oldest stored record is ${formatSpan(now - oldestAt)} old. There is no older pair inside the Uniswap V2, Uniswap V3, Uniswap V4, and SushiSwap backfill.`
     }
     return null
   }

@@ -672,6 +672,7 @@ function toRef(token: TokenAnalysis): TokenRef {
     volume24h: token.volume24h,
     makers24h: token.makers24h,
     url: token.url,
+    quote: token.quote,
   }
 }
 
@@ -687,6 +688,7 @@ function toRefFrom(row: PairRecord, symbol: string, tokenName: string, createdAt
     volume24h: row.volume24h ?? null,
     makers24h: row.makers24h ?? null,
     url: row.url,
+    quote: row.quote === "eth" ? "eth" : undefined,
   }
 }
 

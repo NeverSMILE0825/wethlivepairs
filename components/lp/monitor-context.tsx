@@ -381,7 +381,7 @@ export function LpMonitor({ children }: { children: ReactNode }) {
           pendingRef.current.delete(sighting.pair)
           const record = pairsRef.current.get(sighting.pair)
           if (record) for (const item of waiting) announce(record, item.transfer)
-          if (record) publishActivity({ type: "pair", record, token0: null })
+          if (record) publishActivity({ type: "pair", record, token0: sighting.token0 })
           return
         }
         const record = pairsRef.current.get(sighting.transfer.pair)

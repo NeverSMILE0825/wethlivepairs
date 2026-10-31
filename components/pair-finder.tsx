@@ -53,6 +53,7 @@ import {
   OUTPUT_FORMATS,
   TIME_ZONES,
   canBurnLp,
+  exchangeWithQuote,
   filenameFor,
   formatCreated,
   normalizeLp,
@@ -340,7 +341,7 @@ function BurntCard({ record, zone, isNew }: { record: PairRecord; zone: string; 
             {isNew ? <Badge className="bg-emerald-400/20 text-emerald-300">NEW</Badge> : null}
           </p>
           <p className="text-xs text-muted-foreground">
-            {record.exchange} · <span className="font-mono">{formatCreated(record.created_at, zone)}</span>
+            {exchangeWithQuote(record.exchange, record.quote)} · <span className="font-mono">{formatCreated(record.created_at, zone)}</span>
           </p>
         </div>
         <a
@@ -1047,7 +1048,7 @@ export function PairFinder() {
           ) : null}
 
           {run && run.mode === "all" && run.records.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No WETH pairs were created in this window.</p>
+            <p className="text-sm text-muted-foreground">No pairs were created in this window.</p>
           ) : null}
 
           {run && run.mode === "all" && rows.length > 0 ? (
@@ -1081,7 +1082,7 @@ export function PairFinder() {
                         ) : null}
                       </TableCell>
                       <TableCell className="font-mono text-xs whitespace-nowrap">{formatCreated(record.created_at, zone)}</TableCell>
-                      <TableCell className="whitespace-nowrap">{record.exchange}</TableCell>
+                      <TableCell className="whitespace-nowrap">{exchangeWithQuote(record.exchange, record.quote)}</TableCell>
                       <TableCell className="text-right whitespace-nowrap">{formatPrice(record.price)}</TableCell>
                       <TableCell className="text-right whitespace-nowrap">{formatUsd(record.marketCap)}</TableCell>
                       <TableCell className="text-right whitespace-nowrap">{formatUsd(liquidityOf(record))}</TableCell>

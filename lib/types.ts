@@ -13,6 +13,16 @@ export type PairRow = {
   remaining: number | null
   remainingUnit: string
   listingLiquidity: number | null
+  /** Uniswap V4 can quote native ETH. Missing means WETH, including rows saved before native ETH was collected. */
+  quote?: "eth" | "weth"
+}
+
+export function quoteLabel(quote: "eth" | "weth" | null | undefined): "ETH" | "WETH" {
+  return quote === "eth" ? "ETH" : "WETH"
+}
+
+export function exchangeWithQuote(exchange: string, quote: "eth" | "weth" | null | undefined): string {
+  return quote === "eth" ? `${exchange} · ETH` : exchange
 }
 
 export type PairDetail = {

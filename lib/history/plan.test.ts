@@ -11,9 +11,12 @@ import {
   jobProgress,
   openHistoryJob,
   PAIR_COVERAGE,
+  NATIVE_ETH,
   parsePairCreated,
   POOL_CREATED_TOPIC,
+  quoteSide,
   V4_INITIALIZE_TOPIC,
+  WETH,
   wethSide,
 } from "./plan"
 
@@ -86,6 +89,15 @@ test("a finished scan walks the blocks it had left to the listing, then stays fi
   assert.equal(idle.phase, "done")
 })
 
+test("a saved pair scan that only kept WETH quotes is read again for native ETH", () => {
+  const opened = openHistoryJob("weth-pairs", 26_000_000, "2026-10-08T12:00:00.000Z", null)
+  const wethOnly = { ...opened, status: "completed" as const, phase: "done" as const, coverage: 2, recentEnd: opened.recentEnd }
+  const restarted = openHistoryJob("weth-pairs", 26_000_000, "2026-10-08T18:00:00.000Z", wethOnly)
+  assert.equal(restarted.coverage, PAIR_COVERAGE)
+  assert.equal(restarted.cursor, restarted.recentStart)
+  assert.ok(restarted.olderStart < restarted.recentStart)
+})
+
 test("a saved pair scan without V4 coverage is read again from the seven day start", () => {
   const opened = openHistoryJob("weth-pairs", 26_000_000, "2026-10-08T12:00:00.000Z", null)
   const old = { ...opened, status: "completed" as const, phase: "done" as const, coverage: undefined, recentEnd: opened.recentEnd - 8_000 }
@@ -112,6 +124,26 @@ test("a Uniswap V4 initialize log keeps the full pool id", () => {
   })
   assert.equal(log?.pair, id)
   assert.equal(wethSide(log!.token0, log!.token1)?.token, token)
+  assert.equal(quoteSide(log!.token0, log!.token1, "Uniswap V4")?.quote, "weth")
+})
+
+test("a Uniswap V4 initialize against native ETH keeps the ERC-20, and V2 does not", () => {
+  const id = "0x" + "cd".repeat(32)
+  const token = "0x1111111111111111111111111111111111111111"
+  const log = parsePairCreated({
+    address: "0x000000000004444c5dc75cB358380D2e3dE08A90",
+    topics: [V4_INITIALIZE_TOPIC, id, `0x${NATIVE_ETH.slice(2).padStart(64, "0")}`, `0x${token.slice(2).padStart(64, "0")}`],
+    data: "0x" + "00".repeat(32),
+    blockNumber: "0x1909b2d",
+  })
+  assert.equal(log?.token0, NATIVE_ETH)
+  assert.equal(quoteSide(log!.token0, log!.token1, "Uniswap V4")?.token, token)
+  assert.equal(quoteSide(log!.token0, log!.token1, "Uniswap V4")?.quote, "eth")
+  assert.equal(quoteSide(log!.token0, log!.token1, "Uniswap V3"), null)
+  assert.equal(quoteSide(log!.token0, log!.token1, "Uniswap V2"), null)
+  assert.equal(quoteSide(token, NATIVE_ETH, "Uniswap V4")?.side, "token1")
+  assert.equal(quoteSide(NATIVE_ETH, WETH, "Uniswap V4")?.token, WETH)
+  assert.equal(quoteSide(NATIVE_ETH, NATIVE_ETH, "Uniswap V4"), null)
 })
 
 test("a Uniswap V3 PoolCreated log keeps the pool address from the second word", () => {

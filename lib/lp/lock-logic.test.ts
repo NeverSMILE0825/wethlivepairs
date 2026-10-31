@@ -72,6 +72,11 @@ test("one locked V3 position is not reported as the whole pool", () => {
   assert.equal(position?.fee, 3000)
   assert.equal(wethToken(position?.token0 ?? "", position?.token1 ?? ""), "0xc011a73ee8576fb46f5e1c5751ca3b9fe0af2a6f")
   assert.equal(wethToken("0x1111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222"), null)
+  const token = "0x1111111111111111111111111111111111111111"
+  const native = "0x0000000000000000000000000000000000000000"
+  assert.equal(wethToken(native, token), null)
+  assert.equal(wethToken(native, token, true), token)
+  assert.equal(wethToken(token, native, true), token)
 })
 
 test("an expired lock stays withdrawable until a withdrawal is observed", () => {

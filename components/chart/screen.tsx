@@ -10,7 +10,7 @@ import { loadV2Trades } from "@/lib/chart/load"
 import { classifyStructure } from "@/lib/chart/structure"
 import { appendOutcome, calibration, commonMistake, drillPairs, submitReview, VERDICT_LABEL, VERDICTS, type ChartReview, type ReviewOutcome, type VerdictId } from "@/lib/chart/training"
 import { pumpHub } from "@/lib/pump/client"
-import type { PairRecord } from "@/lib/types"
+import { quoteLabel, type PairRecord } from "@/lib/types"
 
 const WETH = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
 const REVIEW_KEY = "weth-chart-reviews-v1"
@@ -372,7 +372,7 @@ function PairStudy({ address, rows, version, blind, drill, reviews, onReviews }:
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-[11px] tracking-[0.16em] text-primary uppercase">{row.exchange}</p>
-          <h1 className="text-2xl font-semibold">{row.symbol || row.name} / WETH</h1>
+          <h1 className="text-2xl font-semibold">{row.symbol || row.name} / {quoteLabel(row.quote)}</h1>
           <p className="text-sm text-muted-foreground">{report.stage} · age {ageLabel(report.ageMs)} · LP {row.lpStatus}{row.lpBurntPercent ? ` ${row.lpBurntPercent}%` : ""}</p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">

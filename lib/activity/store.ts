@@ -43,6 +43,8 @@ export type ActivityItem = {
   href: string
   /** Uniswap fee in hundredths of a bip, when the pool records one. */
   feeBps?: number | null
+  /** Native ETH on Uniswap V4. Missing means the quote is WETH. */
+  quote?: "eth" | "weth"
   /** From the realtime feed rather than the published snapshot. */
   live: boolean
   /** Local time this card first appeared, for the arrival highlight. */
@@ -107,8 +109,12 @@ function pooledFromRow(row: PairRecord): number | null {
   return /^w?eth$/i.test(row.remainingUnit) ? row.remaining : null
 }
 
+function unnamedChainPair(name: string | null | undefined): boolean {
+  return name === "WETH pair" || name === "ETH pair"
+}
+
 export function identityOf(record: PairRecord): { name: string; symbol: string } {
-  if (record.listingSource === "ethereum-pair-created" && !record.symbol && record.name === "WETH pair") return { name: "", symbol: "" }
+  if (record.listingSource === "ethereum-pair-created" && !record.symbol && unnamedChainPair(record.name)) return { name: "", symbol: "" }
   const identity = parseIdentity(record)
   return { name: identity.tokenName, symbol: identity.symbol }
 }
@@ -137,6 +143,7 @@ export function pairActivity(record: PairRecord, live: boolean): ActivityInput {
     detail: null,
     href: live ? record.url : `/tokens/${token}`,
     live,
+    quote: record.quote === "eth" ? "eth" : undefined,
   }
 }
 
@@ -171,8 +178,8 @@ export function burnActivity(event: LpBurnEvent, live: boolean): ActivityInput {
     tokenAddress: token,
     pairAddress: text(event.pair).toLowerCase(),
     exchange: event.exchange,
-    name: event.symbol === "WETH pair" ? "" : text(event.tokenName),
-    symbol: event.symbol === "WETH pair" ? "" : text(event.symbol),
+    name: unnamedChainPair(event.symbol) ? "" : text(event.tokenName),
+    symbol: unnamedChainPair(event.symbol) ? "" : text(event.symbol),
     pairCreatedAt: text(event.createdAt),
     lpBurnPercent: event.percentKnown === false ? null : event.lpBurntPercent,
     title: null,

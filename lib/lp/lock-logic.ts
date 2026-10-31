@@ -5,6 +5,7 @@ export const V3_POSITION_MANAGER = "0xc36442b4a4522e871399cd717abdd847ab11fe88"
 export const V4_POSITION_MANAGER = "0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e"
 export const V3_FACTORY = "0x1f98431c8ad98523631ae4a59f267346ea31f984"
 export const WETH = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+const NATIVE_ETH = "0x0000000000000000000000000000000000000000"
 
 const DEPOSIT = "0xeb65d0f36862bbd8763c5e2c983c9d753267d223eee35a224d8d0a9d7ef433a2"
 const DEPOSIT_NFT = "0x8ada5a61cb829cf6dd4a74752fd8a7524261a767c2c80ee9398343e2063ef144"
@@ -269,9 +270,11 @@ export function decodeV3Position(data: string): { token0: string; token1: string
   return { token0, token1, fee: Number(fee), liquidity }
 }
 
-export function wethToken(token0: string, token1: string): string | null {
+export function wethToken(token0: string, token1: string, acceptNativeEth = false): string | null {
   const a = token0.toLowerCase()
   const b = token1.toLowerCase()
+  if (acceptNativeEth && a === NATIVE_ETH && b !== NATIVE_ETH) return b
+  if (acceptNativeEth && b === NATIVE_ETH && a !== NATIVE_ETH) return a
   if (a === WETH && b !== WETH) return b
   if (b === WETH && a !== WETH) return a
   if (a === WETH && b === WETH) return WETH
@@ -329,7 +332,7 @@ export async function resolveLock(log: LockerLog, call: (to: string, data: strin
     const token1 = encoded ? addressWord(encoded, 1) : null
     const fee = encoded ? word(encoded, 2) : null
     if (!token0 || !token1 || fee == null) return null
-    const token = wethToken(token0, token1)
+    const token = wethToken(token0, token1, true)
     if (!token) return null
     return sighting(log, id, { pair: null, token, exchange: "Uniswap V4", feeBps: Number(fee), percent: 100, kind: "position" })
   }

@@ -1,10 +1,14 @@
 import { ListingError, requestJson, sleep } from "@/lib/http"
+import { NATIVE_ETH } from "@/lib/history/plan"
+import { protocolVersion } from "@/lib/protocol/identity"
 import { COLLECTION_MAX_HOURS, UNKNOWN_EXCHANGE, type PairRow } from "@/lib/types"
 
 const LISTING_API = "https://www.dextools.io/api/core"
 const EXCHANGES_API = "https://www.dextools.io/shared/exchanges/v2"
 const CHAIN = "ether"
 const WETH_ADDRESS = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+/** Some listings write native ETH as this placeholder instead of the zero address Uniswap V4 uses. */
+const NATIVE_PLACEHOLDER = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 const PAGE_SIZE = 100
 const PAGE_DELAY_MS = 120
 
@@ -44,8 +48,12 @@ function isWeth(token: TokenSide | undefined): boolean {
   return (token?.address ?? "").toLowerCase() === WETH_ADDRESS
 }
 
-function pairName(pool: Pool): string {
-  const token = isWeth(pool.mainToken) && !isWeth(pool.sideToken) ? pool.sideToken : pool.mainToken
+function isNativeEth(token: TokenSide | undefined): boolean {
+  const address = (token?.address ?? "").toLowerCase()
+  return address === NATIVE_ETH || address === NATIVE_PLACEHOLDER
+}
+
+function pairName(token: TokenSide | undefined): string {
   const symbol = token?.symbol?.trim() || "?"
   const tokenName = token?.name?.trim() ?? ""
   if (tokenName && tokenName.toLowerCase() !== symbol.toLowerCase()) {
@@ -62,22 +70,29 @@ function toRow(pool: Pool, exchangeNames: Map<string, string>): PairRow | null {
   const address = pool.address?.trim() ?? ""
   const createdRaw = pool.creationTime?.trim() ?? ""
   if (!address || !createdRaw) return null
-  if (!isWeth(pool.mainToken) && !isWeth(pool.sideToken)) return null
   const slug = (pool.exchange ?? "").trim().toLowerCase()
-  const token = isWeth(pool.mainToken) && !isWeth(pool.sideToken) ? pool.sideToken : pool.mainToken
+  const exchange = (slug && exchangeNames.get(slug)) || UNKNOWN_EXCHANGE
+  const nativeQuote = (isNativeEth(pool.mainToken) || isNativeEth(pool.sideToken)) && protocolVersion(exchange) === "v4"
+  const wethQuote = isWeth(pool.mainToken) || isWeth(pool.sideToken)
+  if (!wethQuote && !nativeQuote) return null
+  const token = nativeQuote
+    ? (isNativeEth(pool.mainToken) && !isNativeEth(pool.sideToken) ? pool.sideToken : pool.mainToken)
+    : (isWeth(pool.mainToken) && !isWeth(pool.sideToken) ? pool.sideToken : pool.mainToken)
+  if (!token?.address || isNativeEth(token)) return null
   const quote = token === pool.mainToken ? pool.sideToken : pool.mainToken
   const quoteSymbol = quote?.symbol?.trim() || ""
   return {
-    name: pairName(pool),
+    name: pairName(token),
     created_at: parseCreated(createdRaw).toISOString(),
-    exchange: (slug && exchangeNames.get(slug)) || UNKNOWN_EXCHANGE,
+    exchange,
     address,
-    tokenAddress: token?.address?.trim() ?? "",
+    tokenAddress: token.address.trim(),
     url: pairUrl(address),
     price: typeof pool.price === "number" ? pool.price : null,
     remaining: typeof pool.poolRemaining === "number" ? pool.poolRemaining : null,
-    remainingUnit: !quoteSymbol || quoteSymbol.toUpperCase() === "WETH" ? "ETH" : quoteSymbol,
+    remainingUnit: !quoteSymbol || quoteSymbol.toUpperCase() === "WETH" || quoteSymbol.toUpperCase() === "ETH" ? "ETH" : quoteSymbol,
     listingLiquidity: typeof pool.liquidity === "number" ? pool.liquidity : null,
+    quote: nativeQuote ? "eth" : "weth",
   }
 }
 

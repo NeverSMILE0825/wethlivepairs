@@ -1,4 +1,4 @@
-import { HISTORY_BUDGET_MS, FACTORIES, PAIR_CREATED_TOPIC, POOL_CREATED_TOPIC, V4_INITIALIZE_TOPIC, advanceJob, classifyRpcFailure, currentSlice, decodeCallResult, dexForFactory, focusOlderGap, parsePairCreated, wethSide, type HistoryJob } from "@/lib/history/plan"
+import { HISTORY_BUDGET_MS, FACTORIES, PAIR_CREATED_TOPIC, POOL_CREATED_TOPIC, V4_INITIALIZE_TOPIC, advanceJob, classifyRpcFailure, currentSlice, decodeCallResult, dexForFactory, focusOlderGap, parsePairCreated, quoteSide, type HistoryJob, type QuoteAsset } from "@/lib/history/plan"
 import { TRANSFER_TOPIC, burnPercent, classifyLpTransfer, isBurnAddress, parseTransferLog } from "@/lib/lp/burn-logic"
 import type { ChainBurn } from "@/lib/lp/chain-scan"
 import { EMPTY_DETAIL, type PairRecord } from "@/lib/types"
@@ -131,14 +131,14 @@ export async function scanHistoricalPairs(job: HistoryJob, now = new Date()): Pr
     for (const log of logs) {
       const created = parsePairCreated(log)
       if (!created) continue
-      const side = wethSide(created.token0, created.token1)
       const dex = dexForFactory(created.factory)
+      const side = quoteSide(created.token0, created.token1, dex)
       if (!side || !dex) continue
-      found.push(chainPair(created.pair, side.token, dex, clock(created.block), created.block))
+      found.push(chainPair(created.pair, side.token, dex, clock(created.block), created.block, side.quote))
     }
     pairs.push(...found)
     if (chunk < PAIR_CHUNK) chunk = Math.min(PAIR_CHUNK, chunk * 2)
-    current = advanceJob(current, slice.to + 1, now.toISOString(), "Scanning Ethereum for WETH pairs")
+    current = advanceJob(current, slice.to + 1, now.toISOString(), "Scanning Ethereum for WETH and V4 native ETH pairs")
     current = { ...current, pairsFound: current.pairsFound + found.length, error: null }
     if (current.phase === "done") break
   }
@@ -291,7 +291,7 @@ export async function enrichIdentity(records: PairRecord[], limit = 80): Promise
   return next
 }
 
-function chainPair(pair: string, token: string, dex: string, createdAt: string, block: number): PairRecord {
+function chainPair(pair: string, token: string, dex: string, createdAt: string, block: number, quote: QuoteAsset): PairRecord {
   const short = `${token.slice(0, 8)}…`
   return {
     name: short,
@@ -304,6 +304,7 @@ function chainPair(pair: string, token: string, dex: string, createdAt: string, 
     remaining: null,
     remainingUnit: "ETH",
     listingLiquidity: null,
+    quote,
     ...EMPTY_DETAIL,
     symbol: short,
     tokenName: "Name not read yet",

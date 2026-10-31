@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { PAIR_CREATED_TOPIC, WETH } from "../history/plan"
+import { NATIVE_ETH, PAIR_CREATED_TOPIC, V4_INITIALIZE_TOPIC, WETH } from "../history/plan"
 import { TRANSFER_TOPIC } from "./burn-logic"
 import { burnEventId } from "./monitor"
 import { liveBurnEvent, sightingFromMessage } from "./live-feed"
@@ -99,4 +99,37 @@ test("a WETH PairCreated log is recognized and a non-WETH pair is not", () => {
     },
   }, new Set())
   assert.equal(other, null)
+})
+
+test("a Uniswap V4 pool against native ETH is a live pair, and the same currencies on V2 are not", () => {
+  const token = "0x2222222222222222222222222222222222222222"
+  const poolId = "0x" + "cd".repeat(32)
+  const sighting = sightingFromMessage({
+    params: {
+      result: {
+        address: "0x000000000004444c5dc75cb358380d2e3de08a90",
+        topics: [V4_INITIALIZE_TOPIC, poolId, "0x" + NATIVE_ETH.slice(2).padStart(64, "0"), "0x" + token.slice(2).padStart(64, "0")],
+        data: "0x" + "00".repeat(32),
+        blockNumber: "0x20",
+      },
+    },
+  }, new Set())
+  assert.equal(sighting?.type, "pair")
+  if (sighting?.type === "pair") {
+    assert.equal(sighting.pair, poolId)
+    assert.equal(sighting.token, token)
+    assert.equal(sighting.quote, "eth")
+    assert.equal(sighting.dex, "Uniswap V4")
+  }
+  const v2 = sightingFromMessage({
+    params: {
+      result: {
+        address: "0x5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f",
+        topics: [PAIR_CREATED_TOPIC, "0x" + NATIVE_ETH.slice(2).padStart(64, "0"), "0x" + token.slice(2).padStart(64, "0")],
+        data: "0x" + "11".repeat(32),
+        blockNumber: "0x20",
+      },
+    },
+  }, new Set())
+  assert.equal(v2, null)
 })

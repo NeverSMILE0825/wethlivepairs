@@ -85,6 +85,8 @@ export type TokenRef = {
   volume24h: number | null
   makers24h: number | null
   url: string
+  /** Native ETH on Uniswap V4. Missing means the quote is WETH. */
+  quote?: "eth" | "weth"
 }
 
 export type TokenAnalysis = TokenRef & {

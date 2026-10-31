@@ -52,14 +52,14 @@ export function Dashboard() {
   const fastest = intel?.concepts.filter((trend) => trend.count >= 2).sort((a, b) => (b.growth ?? -1) - (a.growth ?? -1))[0]
 
   return (
-    <PageFrame eyebrow="Name and ticker intelligence" title="What is being named right now?" lede="Discover which names, tickers, memes, people, and narratives are appearing across newly launched WETH pairs." updated={snapshot ? `Dataset updated ${formatCreated(snapshot.generatedAt, "local")}` : undefined}>
+    <PageFrame eyebrow="Name and ticker intelligence" title="What is being named right now?" lede="Discover which names, tickers, memes, people, and narratives are appearing across newly launched WETH pairs and Uniswap V4 native ETH pairs." updated={snapshot ? `Dataset updated ${formatCreated(snapshot.generatedAt, "local")}` : undefined}>
       <WindowPicker value={windowId} onChange={setWindowId} />
       <p className="text-sm text-muted-foreground"><Link href="/chart/" className="text-primary">Chart Intelligence</Link> keeps a 60-second evidence review and a daily drill beside this board. It does not sit on LP burn detection.</p>
       <DataGate loading={loading || (snapshot != null && intel == null && !intelFailed)} error={error ?? (intelFailed ? "The name and ticker window could not be built." : null)} ready={Boolean(intel && pulse)}>
         {intel && pulse && snapshot ? (
           <>
             <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              <Kpi href="/pairs" label="New WETH pairs" value={String(pulse.pairs)} detail={`Last ${intel.windowLabel.toLowerCase()} · ${signed(pulse.pairChange)}`} />
+              <Kpi href="/pairs" label="New pairs" value={String(pulse.pairs)} detail={`Last ${intel.windowLabel.toLowerCase()} · ${signed(pulse.pairChange)}`} />
               <Kpi href="/lp-burns" label="LP burned" value={String(pulse.burned)} detail={`Last ${intel.windowLabel.toLowerCase()} · ${signed(pulse.burnChange)}`} />
               <Kpi href={topName ? `/trends/${topName.slug}` : "/trends"} label="Hot narrative" value={topName?.name ?? "None yet"} detail={topName ? `Trend score ${topName.score}` : "No repeated name"} />
               <Kpi href={fastest ? `/trends/${fastest.slug}` : "/trends"} label="Fastest rising" value={fastest?.name ?? "None yet"} detail={fastest ? `${fastest.previousCount} → ${fastest.count} launches` : "No acceleration yet"} />
