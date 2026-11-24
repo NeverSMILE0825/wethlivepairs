@@ -12,7 +12,7 @@ import { parseIdentity } from "@/lib/narrative/text"
 import { CONCEPTS } from "@/lib/narrative/lexicon"
 import { EthMarketWidget, EthereumGasWidget, notifyMarketBlock } from "@/components/shell/market-widgets"
 import { ActivityBoard } from "@/components/shell/activity-board"
-import { LiveActivity } from "@/components/shell/live-activity"
+import { LiveActivity, useActivityList } from "@/components/shell/live-activity"
 import { Popover } from "@/components/shell/popover"
 import { activityEngine } from "@/lib/activity/client"
 import { clearRecovery } from "@/lib/recover"
@@ -118,17 +118,33 @@ export function AppShell({ children }: { children: ReactNode }) {
     activityEngine()?.onHead(block)
   }, [block])
 
+  const activity = useActivityList()
   const latestPair = useMemo(() => {
-    const rows = snapshot?.rows ?? []
-    return rows.reduce<string | null>((best, row) => (!best || row.created_at > best ? row.created_at : best), null)
-  }, [snapshot])
+    let best: string | null = null
+    for (const row of snapshot?.rows ?? []) {
+      if (row.created_at && (!best || row.created_at > best)) best = row.created_at
+    }
+    for (const item of activity) {
+      if (item.type !== "new-pair") continue
+      const at = item.pairCreatedAt || item.occurredAt
+      if (at && (!best || at > best)) best = at
+    }
+    return best
+  }, [snapshot, activity])
   const latestBurn = useMemo(() => {
-    if (!snapshot) return null
-    return eventsOf(snapshot).reduce<string | null>((best, event) => {
-      const at = event.burnAt || event.detectedAt
-      return !best || at > best ? at : best
-    }, null)
-  }, [snapshot])
+    let best: string | null = null
+    if (snapshot) {
+      for (const event of eventsOf(snapshot)) {
+        const at = event.burnAt || event.detectedAt
+        if (at && (!best || at > best)) best = at
+      }
+    }
+    for (const item of activity) {
+      if (item.type !== "lp-burn") continue
+      if (item.occurredAt && (!best || item.occurredAt > best)) best = item.occurredAt
+    }
+    return best
+  }, [snapshot, activity])
 
   const statusText = mode === "realtime" ? "Live Ethereum feed" : mode === "paused" ? "LP burn monitor paused" : mode === "error" ? "Feed reconnecting" : "LP burn monitor polling"
 
