@@ -1,13 +1,17 @@
 import { FACTORIES, HEAD_REORG_BLOCKS, PAIR_CREATED_TOPIC, POOL_CREATED_TOPIC, V4_INITIALIZE_TOPIC, classifyRpcFailure, dexForFactory, parsePairCreated, quoteSide } from "@/lib/history/plan"
 import { TRANSFER_TOPIC, blocksForHours, classifyLpTransfer, parseTransferLog, type ParsedTransfer } from "@/lib/lp/burn-logic"
 
-/** Same hosts as live-activity enrichment. The LP burn socket is not used here. */
-const CATCHUP_RPCS = ["https://rpc.mevblocker.io", "https://eth.drpc.org"] as const
+/**
+ * Wide reads try the enrichment hosts first. A host that names a block cap is skipped for larger
+ * slices. The LP burn socket host is only the last resort, so a normal update does not share it.
+ */
+const CATCHUP_RPCS = ["https://rpc.mevblocker.io", "https://eth.drpc.org", "https://ethereum-rpc.publicnode.com"] as const
+const HOST_CAP = new Map<string, number>()
 
 /** How far behind a published snapshot the open page will read from Ethereum. A day covers a missed publish. */
 export const CATCHUP_HOURS = 24
 export const CATCHUP_CHUNK = 2_000
-const MIN_CHUNK = 200
+const MIN_CHUNK = 20
 const ZERO_TOPIC = `0x${"0".repeat(64)}`
 const DEAD_TOPIC = `0x${"0".repeat(24)}000000000000000000000000000000000000dead`
 
@@ -75,10 +79,37 @@ async function sliceClock(rpc: CatchUpRpc, from: number, to: number): Promise<(b
   }
 }
 
+/** A provider that says "over 100 blocks" can answer a slice of that size. */
+export function rangeCap(message: string): number | null {
+  const match = /(?:over|exceeds?|more than)\s+(\d+)\s+blocks/i.exec(message)
+  if (!match) return null
+  const value = Number(match[1])
+  return Number.isInteger(value) && value >= 1 ? value : null
+}
+
+export function blockSpan(method: string, params: unknown[]): number | null {
+  if (method !== "eth_getLogs") return null
+  const filter = params[0] as { fromBlock?: string; toBlock?: string } | undefined
+  const from = Number.parseInt(filter?.fromBlock ?? "", 16)
+  const to = Number.parseInt(filter?.toBlock ?? "", 16)
+  if (!Number.isInteger(from) || !Number.isInteger(to) || to < from) return null
+  return to - from + 1
+}
+
+/** Hosts that already refused a wider slice are left for the next, smaller read. */
+export function hostsForSpan(hosts: readonly string[], caps: ReadonlyMap<string, number>, span: number | null): string[] {
+  if (span == null) return [...hosts]
+  return hosts.filter((url) => {
+    const cap = caps.get(url)
+    return cap == null || span <= cap
+  })
+}
+
 async function logsBetween(rpc: CatchUpRpc, filter: Record<string, unknown>, from: number, to: number): Promise<RawLog[]> {
   const found: RawLog[] = []
   let size = CATCHUP_CHUNK
   let cursor = from
+  let stalls = 0
   while (cursor <= to) {
     const end = Math.min(to, cursor + size - 1)
     try {
@@ -86,13 +117,24 @@ async function logsBetween(rpc: CatchUpRpc, filter: Record<string, unknown>, fro
       if (!Array.isArray(page)) throw new Error("No log list")
       found.push(...(page as RawLog[]))
       cursor = end + 1
-      if (size < CATCHUP_CHUNK) size = Math.min(CATCHUP_CHUNK, size * 2)
+      stalls = 0
     } catch (error) {
       const message = error instanceof Error ? error.message : "Log scan failed"
-      if (classifyRpcFailure(message) !== "fatal" && size > MIN_CHUNK) {
-        size = Math.max(MIN_CHUNK, Math.floor(size / 2))
+      const cap = rangeCap(message)
+      const span = end - cursor + 1
+      if (cap != null && span > cap) {
+        size = Math.max(1, Math.min(size, cap))
+        stalls = 0
         continue
       }
+      const kind = classifyRpcFailure(message)
+      if (kind !== "fatal" && size > MIN_CHUNK) {
+        size = Math.max(MIN_CHUNK, Math.floor(size / 2))
+        stalls = 0
+        continue
+      }
+      stalls += 1
+      if (stalls < 3 && kind !== "fatal") continue
       throw error
     }
   }
@@ -135,10 +177,16 @@ export async function readCatchUp(rpc: CatchUpRpc, range: CatchUpRange, burnPair
   return { pairs, burns }
 }
 
-/** Enrichment hosts only. The LP burn socket stays on its own endpoint. */
+/** Reads one Ethereum method. A host that cannot take the block span is not asked. */
 export async function catchUpRpc(method: string, params: unknown[]): Promise<unknown> {
+  const span = blockSpan(method, params)
+  const hosts = hostsForSpan(CATCHUP_RPCS, HOST_CAP, span)
+  if (hosts.length === 0) {
+    const tightest = Math.min(...HOST_CAP.values())
+    throw new Error(`ranges over ${Number.isFinite(tightest) ? tightest : 100} blocks are not supported on free plan`)
+  }
   let last = "RPC failed"
-  for (const url of CATCHUP_RPCS) {
+  for (const url of hosts) {
     try {
       const response = await fetch(url, {
         method: "POST",
@@ -150,7 +198,10 @@ export async function catchUpRpc(method: string, params: unknown[]): Promise<unk
       if (!response.ok || payload.error) throw new Error(payload.error?.message || `HTTP ${response.status}`)
       return payload.result
     } catch (error) {
-      last = error instanceof Error ? error.message : "RPC error"
+      const message = error instanceof Error ? error.message : "RPC error"
+      const cap = rangeCap(message)
+      if (cap != null) HOST_CAP.set(url, Math.min(HOST_CAP.get(url) ?? cap, cap))
+      last = message
     }
   }
   throw new Error(last)

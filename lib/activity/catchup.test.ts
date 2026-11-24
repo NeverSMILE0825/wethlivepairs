@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { NATIVE_ETH, V4_INITIALIZE_TOPIC, WETH } from "../history/plan"
 import { TRANSFER_TOPIC, blocksForHours } from "../lp/burn-logic"
-import { CATCHUP_HOURS, catchUpRange, readCatchUp, swapCountFrom } from "./catchup"
+import { CATCHUP_HOURS, blockSpan, catchUpRange, hostsForSpan, rangeCap, readCatchUp, swapCountFrom } from "./catchup"
 
 const HEAD = 26_400_000
 
@@ -65,4 +65,40 @@ test("a V4 native ETH initialize is kept and a token-token pool is not", async (
   assert.notEqual(found.pairs[0]?.token, WETH)
   assert.equal(found.burns.length, 1)
   assert.equal(found.burns[0]?.pair, pair)
+})
+
+test("a provider that allows only 100 blocks is read in slices", async () => {
+  const token = "0x2222222222222222222222222222222222222222"
+  const pool = "0x" + "ab".repeat(32)
+  const spans: number[] = []
+  const rpc = async (method: string, params: unknown[]) => {
+    if (method === "eth_getBlockByNumber") return { timestamp: "0x65000000" }
+    const span = blockSpan(method, params)
+    if ((span ?? 0) > 100) throw new Error("ranges over 100 blocks are not supported on free plan")
+    spans.push(span ?? 0)
+    const filter = params[0] as { fromBlock?: string; toBlock?: string }
+    const from = Number.parseInt(filter.fromBlock ?? "", 16)
+    const to = Number.parseInt(filter.toBlock ?? "", 16)
+    if (from > 16 || to < 16) return []
+    return [{
+      address: "0x000000000004444c5dc75cb358380d2e3de08a90",
+      topics: [V4_INITIALIZE_TOPIC, pool, "0x" + NATIVE_ETH.slice(2).padStart(64, "0"), "0x" + token.slice(2).padStart(64, "0")],
+      data: "0x" + "00".repeat(32),
+      blockNumber: "0x10",
+    }]
+  }
+  const found = await readCatchUp(rpc, { from: 1, to: 250 }, [])
+  assert.equal(found.pairs.length, 1)
+  assert.equal(found.pairs[0]?.quote, "eth")
+  assert.ok(spans.every((span) => span <= 100))
+  assert.ok(spans.length > 1)
+})
+
+test("a host capped at 100 blocks is not asked for a wider slice", () => {
+  const caps = new Map([["https://eth.drpc.org", 100]])
+  const hosts = ["https://rpc.mevblocker.io", "https://eth.drpc.org", "https://ethereum-rpc.publicnode.com"]
+  assert.deepEqual(hostsForSpan(hosts, caps, 421), ["https://rpc.mevblocker.io", "https://ethereum-rpc.publicnode.com"])
+  assert.deepEqual(hostsForSpan(hosts, caps, 100), hosts)
+  assert.equal(rangeCap("ranges over 100 blocks are not supported on free plan"), 100)
+  assert.equal(blockSpan("eth_blockNumber", []), null)
 })

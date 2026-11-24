@@ -111,6 +111,7 @@ export function LpMonitor({ children }: { children: ReactNode }) {
   const [catchError, setCatchError] = useState<string | null>(null)
   const catchingRef = useRef(false)
   const autoCatchRef = useRef(false)
+  const caughtBlockRef = useRef<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastCheck, setLastCheck] = useState<number | null>(null)
@@ -255,53 +256,65 @@ export function LpMonitor({ children }: { children: ReactNode }) {
     catchingRef.current = true
     setCatching(true)
     setCatchError(null)
+    let lastError: unknown = null
     try {
-      lastFetchRef.current = Date.now()
-      setLastCheck(Date.now())
-      const response = await fetch(`/data/snapshot.json?t=${Date.now()}`, { cache: "no-store" })
-      if (!response.ok) throw new Error("The published pair list is not available.")
-      const data = (await response.json()) as SnapshotFile
-      setSnapshot(data)
-      setError(null)
-      const map = new Map(pairsRef.current)
-      for (const row of data.rows ?? []) {
-        if (row?.address) map.set(row.address.toLowerCase(), row)
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          lastFetchRef.current = Date.now()
+          setLastCheck(Date.now())
+          const response = await fetch(`/data/snapshot.json?t=${Date.now()}`, { cache: "no-store" })
+          if (!response.ok) throw new Error("The published pair list is not available.")
+          const data = (await response.json()) as SnapshotFile
+          setSnapshot(data)
+          setError(null)
+          const map = new Map(pairsRef.current)
+          for (const row of data.rows ?? []) {
+            if (row?.address) map.set(row.address.toLowerCase(), row)
+          }
+          const headHex = await catchUpRpc("eth_blockNumber", [])
+          const head = Number.parseInt(String(headHex), 16)
+          const published = data.chain?.headBlock ?? data.backfill?.pairs?.recentEnd ?? null
+          const remembered = caughtBlockRef.current
+          const covered = remembered != null && (typeof published !== "number" || remembered >= published) ? remembered : published
+          const range = catchUpRange(head, typeof covered === "number" ? covered : null)
+          if (range) {
+            const burnPairs = [...map.values()]
+              .filter((row) => canBurnLp(row.exchange) && /^0x[0-9a-f]{40}$/i.test(row.address))
+              .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
+              .slice(0, 48)
+              .map((row) => row.address)
+            const found = await readCatchUp(catchUpRpc, range, burnPairs)
+            for (const pair of found.pairs) {
+              const key = pair.pair.toLowerCase()
+              if (map.has(key)) continue
+              const record = recordFromPairSighting({ type: "pair", pair: pair.pair, token: pair.token, token0: pair.token0, dex: pair.dex, block: pair.block, quote: pair.quote }, pair.at)
+              map.set(key, record)
+              publishActivity({ type: "pair", record, token0: pair.token0 })
+            }
+            for (const burn of found.burns) {
+              const record = map.get(burn.pair.toLowerCase())
+              if (!record) continue
+              publishActivity({ type: "burn", event: liveBurnEvent(record, burn, burn.at) })
+            }
+            pairsRef.current = map
+            caughtBlockRef.current = range.to
+          }
+          requestMetricRefresh(range?.from ?? (typeof covered === "number" ? covered : null))
+          void loadRecentLocks(catchUpRpc, knownPairs([...map.values()])).then((found) => {
+            for (const item of found) {
+              const record = item.lock.pair ? map.get(item.lock.pair) ?? null : null
+              publishActivity({ type: "lock", lock: item.lock, record, at: item.at, symbol: item.symbol || record?.symbol || undefined, name: item.name || record?.tokenName || record?.name || undefined })
+            }
+          }).catch(() => undefined)
+          setCaughtUpAt(Date.now())
+          lastError = null
+          break
+        } catch (caught) {
+          lastError = caught
+          if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 800 * (attempt + 1)))
+        }
       }
-      const headHex = await catchUpRpc("eth_blockNumber", [])
-      const head = Number.parseInt(String(headHex), 16)
-      const covered = data.chain?.headBlock ?? data.backfill?.pairs?.recentEnd ?? null
-      const range = catchUpRange(head, typeof covered === "number" ? covered : null)
-      if (range) {
-        const burnPairs = [...map.values()]
-          .filter((row) => canBurnLp(row.exchange) && /^0x[0-9a-f]{40}$/i.test(row.address))
-          .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
-          .slice(0, 48)
-          .map((row) => row.address)
-        const found = await readCatchUp(catchUpRpc, range, burnPairs)
-        for (const pair of found.pairs) {
-          const key = pair.pair.toLowerCase()
-          if (map.has(key)) continue
-          const record = recordFromPairSighting({ type: "pair", pair: pair.pair, token: pair.token, token0: pair.token0, dex: pair.dex, block: pair.block, quote: pair.quote }, pair.at)
-          map.set(key, record)
-          publishActivity({ type: "pair", record, token0: pair.token0 })
-        }
-        for (const burn of found.burns) {
-          const record = map.get(burn.pair.toLowerCase())
-          if (!record) continue
-          publishActivity({ type: "burn", event: liveBurnEvent(record, burn, burn.at) })
-        }
-        pairsRef.current = map
-      }
-      requestMetricRefresh(range?.from ?? (typeof covered === "number" ? covered : null))
-      void loadRecentLocks(catchUpRpc, knownPairs([...map.values()])).then((found) => {
-        for (const item of found) {
-          const record = item.lock.pair ? map.get(item.lock.pair) ?? null : null
-          publishActivity({ type: "lock", lock: item.lock, record, at: item.at, symbol: item.symbol || record?.symbol || undefined, name: item.name || record?.tokenName || record?.name || undefined })
-        }
-      }).catch(() => undefined)
-      setCaughtUpAt(Date.now())
-    } catch (caught) {
-      setCatchError(caught instanceof Error ? caught.message : "The Ethereum update did not finish.")
+      if (lastError) setCatchError(lastError instanceof Error ? lastError.message : "The Ethereum update did not finish.")
     } finally {
       catchingRef.current = false
       setCatching(false)
@@ -344,6 +357,26 @@ export function LpMonitor({ children }: { children: ReactNode }) {
     autoCatchRef.current = true
     void refreshLive()
   }, [ready, snapshot, config.enabled, config.paused, refreshLive])
+
+  useEffect(() => {
+    if (!ready || !config.enabled || config.paused) return
+    let timer = 0
+    const arm = () => {
+      window.clearInterval(timer)
+      timer = 0
+      if (document.visibilityState === "visible") timer = window.setInterval(() => void refreshLive(), 60_000)
+    }
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refreshLive()
+      arm()
+    }
+    arm()
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
+  }, [ready, config.enabled, config.paused, refreshLive])
 
   useEffect(() => {
     const map = new Map<string, PairRecord>()

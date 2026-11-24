@@ -267,7 +267,7 @@ export function mergeRecords<T extends { address: string }>(current: T[], extra:
 /** Rate-limit waits and retries. A timeout or an oversized reply shrinks the range and continues. */
 export function classifyRpcFailure(message: string): "rate-limit" | "shrink" | "fatal" {
   if (/429|rate limit|too many requests/i.test(message)) return "rate-limit"
-  if (/timeout|timed out|free plan|upgrade to paid|abort|gateway|temporar|unavailable|deadline exceeded|ECONNRESET|socket/i.test(message)) return "shrink"
+  if (/timeout|timed out|free plan|upgrade to paid|abort|gateway|temporar|unavailable|deadline exceeded|ECONNRESET|socket|failed to fetch|networkerror|network request failed|load failed/i.test(message)) return "shrink"
   if (/too many|10000|exceed|response size|log limit|more than|query returned more/i.test(message)) return "shrink"
   return "fatal"
 }

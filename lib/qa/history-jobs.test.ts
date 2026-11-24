@@ -52,6 +52,7 @@ test("eta stays hidden until the scan has moved, and a rate limit does not count
   assert.equal(classifyRpcFailure("Request timeout on the free plan, please upgrade to paid plan"), "shrink")
   assert.equal(classifyRpcFailure("The operation was aborted due to timeout"), "shrink")
   assert.equal(classifyRpcFailure("connection refused"), "fatal")
+  assert.equal(classifyRpcFailure("TypeError: Failed to fetch"), "shrink")
 })
 
 test("a stopped backfill resumes from its cursor instead of the latest block", () => {
