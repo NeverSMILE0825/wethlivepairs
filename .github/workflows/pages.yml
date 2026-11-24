@@ -51,6 +51,9 @@ jobs:
         run: |
           rm -rf app/api
           npm run build
+          # wethlivepairs.site is still verified on another account. A CNAME in the
+          # artifact makes GitHub reject the whole github.io deployment.
+          rm -f out/CNAME
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
