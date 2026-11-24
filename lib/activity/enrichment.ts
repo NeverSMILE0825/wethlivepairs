@@ -1,3 +1,4 @@
+import { swapCountFrom } from "@/lib/activity/catchup"
 import { BlockscoutHolderProvider, EthplorerHolderProvider, holderRefreshMs, type TokenHolderProvider } from "@/lib/activity/holders"
 import { GET_RESERVES, POOL_MANAGER, POOL_TOPICS, balanceOfCall, classifyPoolLog, decodeReserves, decodeUint, pooledWethFromReserves, toWeth, type PoolEvent } from "@/lib/activity/pool"
 import type { ActivityStore } from "@/lib/activity/store"
@@ -63,6 +64,7 @@ export class EnrichmentEngine {
   private queued = new Set<string>()
   private running = 0
   private head: number | null = null
+  private gapFrom: number | null = null
   private stopped = true
   private unsubscribe: (() => void) | null = null
   socket: EnrichmentSocket = "closed"
@@ -112,6 +114,18 @@ export class EnrichmentEngine {
 
   onHead(block: number | null) {
     if (block != null && (this.head == null || block > this.head)) this.head = block
+  }
+
+  /** Read reserves, holders, and swaps again for the pairs on screen. `sinceBlock` is the snapshot block already counted. */
+  refreshNow(sinceBlock: number | null): boolean {
+    if (this.stopped) return false
+    this.gapFrom = sinceBlock
+    this.head = null
+    this.initialized.clear()
+    for (const token of this.holderDue.keys()) this.holderDue.set(token, 0)
+    this.sync()
+    this.queueDueHolders()
+    return true
   }
 
   private scheduleSync() {
@@ -223,18 +237,24 @@ export class EnrichmentEngine {
     const created = state.info.creationBlock
     try {
       const head = await this.headBlock()
-      if (created == null || head - created > BACKFILL_MAX_BLOCKS || created > head) {
+      const plan = swapCountFrom(created, head, this.gapFrom, BACKFILL_MAX_BLOCKS)
+      if (!plan) {
+        if (state.txStatus !== "ready") this.store.markUnavailable("totalTx", pair, "DEXTools has no trade count for this pair yet, and it is too old to count from its creation block.")
+        return
+      }
+      if (plan.mode === "gap" && state.txStatus !== "ready") {
         this.store.markUnavailable("totalTx", pair, "DEXTools has no trade count for this pair yet, and it is too old to count from its creation block.")
         return
       }
       const filter =
         state.kind === "v4"
-          ? { address: POOL_MANAGER, topics: [POOL_TOPICS.v4Swap, pair], fromBlock: hex(created), toBlock: hex(head) }
-          : { address: pair, topics: [[POOL_TOPICS.v2Swap, POOL_TOPICS.v3Swap]], fromBlock: hex(created), toBlock: hex(head) }
+          ? { address: POOL_MANAGER, topics: [POOL_TOPICS.v4Swap, pair], fromBlock: hex(plan.from), toBlock: hex(head) }
+          : { address: pair, topics: [[POOL_TOPICS.v2Swap, POOL_TOPICS.v3Swap]], fromBlock: hex(plan.from), toBlock: hex(head) }
       const observedAt = this.now()
       const logs = await this.rpc("eth_getLogs", [filter], [ENRICH_RPCS[0]])
       if (!Array.isArray(logs)) throw new Error("No log list")
-      this.store.setTxBaseline(pair, { count: 0, observedAt, block: created - 1, source: "chain" })
+      if (plan.mode === "full") this.store.setTxBaseline(pair, { count: 0, observedAt, block: plan.from - 1, source: "chain" })
+      else if (state.tx.baseline?.block == null && state.tx.baseline) this.store.setTxBaseline(pair, { ...state.tx.baseline, block: plan.from - 1 })
       for (const log of logs) {
         const event = classifyPoolLog(log)
         if (event?.kind === "swap") this.store.addSwap(pair, event.id, event.block, observedAt)

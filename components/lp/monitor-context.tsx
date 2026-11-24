@@ -2,13 +2,15 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { publishActivity } from "@/lib/activity/bus"
+import { catchUpRange, catchUpRpc, readCatchUp } from "@/lib/activity/catchup"
+import { requestMetricRefresh } from "@/lib/activity/client"
 import { createAudioContext, notificationState, playNamedTone, requestNotifications } from "@/lib/alerts"
 import { freshLiveAlerts, isLiveBurnAlert, notificationCopy, passesNotifyFilter } from "@/lib/lp/burn-logic"
 import { knownPairs, loadRecentLocks } from "@/lib/lp/lock-feed"
 import { liveLockFilter, lockerLogFromMessage, resolveLock, type LockerLog } from "@/lib/lp/lock-logic"
 import { LIVE_HEADS_URL, liveLogFilter, livePairFilter, liveBurnEvent, recordFromPairSighting, sightingFromMessage } from "@/lib/lp/live-feed"
 import type { ParsedTransfer } from "@/lib/lp/burn-logic"
-import type { PairRecord } from "@/lib/types"
+import { canBurnLp, type PairRecord } from "@/lib/types"
 import {
   DEFAULT_CONFIG,
   PAIR_AGE_FILTERS,
@@ -39,6 +41,10 @@ type MonitorValue = {
   alerts: LpBurnEvent[]
   dismiss: (id: string) => void
   scanNow: () => void
+  refreshLive: () => Promise<void>
+  catching: boolean
+  caughtUpAt: number | null
+  catchError: string | null
   testSound: () => void
   testNotification: () => void
   enableNotifications: () => void
@@ -100,6 +106,11 @@ export function LpMonitor({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<WatchConfig>(DEFAULT_CONFIG)
   const [ready, setReady] = useState(false)
   const [snapshot, setSnapshot] = useState<SnapshotFile | null>(null)
+  const [catching, setCatching] = useState(false)
+  const [caughtUpAt, setCaughtUpAt] = useState<number | null>(null)
+  const [catchError, setCatchError] = useState<string | null>(null)
+  const catchingRef = useRef(false)
+  const autoCatchRef = useRef(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastCheck, setLastCheck] = useState<number | null>(null)
@@ -239,6 +250,64 @@ export function LpMonitor({ children }: { children: ReactNode }) {
     publishActivity({ type: "burn", event })
   }, [considerAlerts])
 
+  const refreshLive = useCallback(async () => {
+    if (catchingRef.current) return
+    catchingRef.current = true
+    setCatching(true)
+    setCatchError(null)
+    try {
+      lastFetchRef.current = Date.now()
+      setLastCheck(Date.now())
+      const response = await fetch(`/data/snapshot.json?t=${Date.now()}`, { cache: "no-store" })
+      if (!response.ok) throw new Error("The published pair list is not available.")
+      const data = (await response.json()) as SnapshotFile
+      setSnapshot(data)
+      setError(null)
+      const map = new Map(pairsRef.current)
+      for (const row of data.rows ?? []) {
+        if (row?.address) map.set(row.address.toLowerCase(), row)
+      }
+      const headHex = await catchUpRpc("eth_blockNumber", [])
+      const head = Number.parseInt(String(headHex), 16)
+      const covered = data.chain?.headBlock ?? data.backfill?.pairs?.recentEnd ?? null
+      const range = catchUpRange(head, typeof covered === "number" ? covered : null)
+      if (range) {
+        const burnPairs = [...map.values()]
+          .filter((row) => canBurnLp(row.exchange) && /^0x[0-9a-f]{40}$/i.test(row.address))
+          .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
+          .slice(0, 48)
+          .map((row) => row.address)
+        const found = await readCatchUp(catchUpRpc, range, burnPairs)
+        for (const pair of found.pairs) {
+          const key = pair.pair.toLowerCase()
+          if (map.has(key)) continue
+          const record = recordFromPairSighting({ type: "pair", pair: pair.pair, token: pair.token, token0: pair.token0, dex: pair.dex, block: pair.block, quote: pair.quote }, pair.at)
+          map.set(key, record)
+          publishActivity({ type: "pair", record, token0: pair.token0 })
+        }
+        for (const burn of found.burns) {
+          const record = map.get(burn.pair.toLowerCase())
+          if (!record) continue
+          publishActivity({ type: "burn", event: liveBurnEvent(record, burn, burn.at) })
+        }
+        pairsRef.current = map
+      }
+      requestMetricRefresh(range?.from ?? (typeof covered === "number" ? covered : null))
+      void loadRecentLocks(catchUpRpc, knownPairs([...map.values()])).then((found) => {
+        for (const item of found) {
+          const record = item.lock.pair ? map.get(item.lock.pair) ?? null : null
+          publishActivity({ type: "lock", lock: item.lock, record, at: item.at, symbol: item.symbol || record?.symbol || undefined, name: item.name || record?.tokenName || record?.name || undefined })
+        }
+      }).catch(() => undefined)
+      setCaughtUpAt(Date.now())
+    } catch (caught) {
+      setCatchError(caught instanceof Error ? caught.message : "The Ethereum update did not finish.")
+    } finally {
+      catchingRef.current = false
+      setCatching(false)
+    }
+  }, [])
+
   const load = useCallback(async () => {
     lastFetchRef.current = Date.now()
     setLastCheck(Date.now())
@@ -269,6 +338,12 @@ export function LpMonitor({ children }: { children: ReactNode }) {
     // The interval identity is pollKey. Other config fields must not restart the timer.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, pollKey, load])
+
+  useEffect(() => {
+    if (!ready || !snapshot || autoCatchRef.current || !config.enabled || config.paused) return
+    autoCatchRef.current = true
+    void refreshLive()
+  }, [ready, snapshot, config.enabled, config.paused, refreshLive])
 
   useEffect(() => {
     const map = new Map<string, PairRecord>()
@@ -449,12 +524,16 @@ export function LpMonitor({ children }: { children: ReactNode }) {
       alerts,
       dismiss,
       scanNow: () => setScanNonce((value) => value + 1),
+      refreshLive,
+      catching,
+      caughtUpAt,
+      catchError,
       testSound,
       testNotification,
       enableNotifications,
       deliveryNote,
     }),
-    [config, update, snapshot, loading, error, mode, lastCheck, nextCheck, block, rpc, alerts, dismiss, testSound, testNotification, enableNotifications, deliveryNote],
+    [config, update, snapshot, loading, error, mode, lastCheck, nextCheck, block, rpc, alerts, dismiss, refreshLive, catching, caughtUpAt, catchError, testSound, testNotification, enableNotifications, deliveryNote],
   )
 
   return <MonitorContext.Provider value={value}>{children}</MonitorContext.Provider>

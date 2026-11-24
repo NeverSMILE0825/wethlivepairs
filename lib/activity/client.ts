@@ -5,6 +5,7 @@ import { formatDuration } from "@/lib/lp/lock-logic"
 
 let store: ActivityStore | null = null
 let engine: EnrichmentEngine | null = null
+let pendingGap: number | null | undefined
 
 export function activityStore(): ActivityStore {
   store ??= new ActivityStore()
@@ -53,11 +54,21 @@ export function applySighting(target: ActivityStore, sighting: ActivitySighting)
   }
 }
 
+/** Asks the open page to reread transaction, reserve, and holder figures. `sinceBlock` is already included in the published counts. */
+export function requestMetricRefresh(sinceBlock: number | null) {
+  if (!engine?.refreshNow(sinceBlock)) pendingGap = sinceBlock
+}
+
 /** Starts Live Activity enrichment once per tab. */
 export function startActivity(): () => void {
   const target = activityStore()
   engine ??= new EnrichmentEngine(target)
   engine.start()
+  if (pendingGap !== undefined) {
+    const since = pendingGap
+    pendingGap = undefined
+    engine.refreshNow(since)
+  }
   const off = onActivity((sighting) => applySighting(target, sighting))
   return () => {
     off()

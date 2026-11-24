@@ -13,6 +13,7 @@ import type { MetricSlot } from "@/lib/activity/metrics"
 import { ACTIVITY_FILTERS, filterActivity, type ActivityFilter, type ActivityItem, type ActivityType } from "@/lib/activity/store"
 import { DEFINITIONS, SOURCE_LABEL } from "@/lib/market/copy"
 import { ItemBoundary } from "@/components/shell/recover"
+import { UpdateLiveButton } from "@/components/shell/update-live"
 import { formatAge, formatWeth } from "@/lib/market/format"
 import type { MonitorMode } from "@/components/lp/monitor-context"
 import type { SnapshotFile } from "@/lib/narrative/types"
@@ -109,6 +110,7 @@ export function LiveActivity({ snapshot, mode, expanded, onExpanded }: { snapsho
             <span aria-hidden className={`size-1.5 rounded-full ${status.dot} ${status.pulse ? "live-dot" : ""}`} />
             {status.text}
           </span>
+          <UpdateLiveButton />
           <button type="button" onClick={() => onExpanded(true)} aria-label="Expand live activity to full screen" title="Full screen" className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
             <Maximize2 size={14} aria-hidden />
           </button>

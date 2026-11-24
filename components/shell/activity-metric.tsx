@@ -4,6 +4,7 @@ import { Component, useEffect, useMemo, useState, type ReactNode } from "react"
 import { pointsInRange, type ConditionPoint as HistoryPoint } from "@/lib/activity/market-history"
 import { ACTIVITY_LABEL, CONDITION_LABEL, formatCompact, formatDelta, formatInZone, heatmap, hourSpanLabel, hourTotals, rankHourTotals, type ActivityBucket, type ActivityLevel, type ScoreResult, type WindowStat } from "@/lib/activity/pulse"
 import { formatChange } from "@/lib/market/format"
+import { UpdateLiveButton } from "@/components/shell/update-live"
 import { resolveZone } from "@/lib/types"
 
 export type SeriesMode = "pairs" | "burns" | "locks" | "both"
@@ -271,6 +272,7 @@ export function MarketPulse({
         <PulseStat label="Gas" value={gas == null ? "—" : `${gas < 1 ? gas.toFixed(3) : gas.toFixed(2)} gwei`} delta={gasLabel ?? "—"} change={null} />
         <PulseStat label="ETH 1H" value={formatChange(eth1h)} delta="" change={eth1h} />
         <p className={`text-[10px] ${stale ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>{stale ? `⚠ Updated ${fresh}` : `Updated ${fresh}`}</p>
+        <UpdateLiveButton />
         <button type="button" onClick={() => setOpen((value) => !value)} className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" aria-expanded={open}>
           {open ? "Hide details" : "View details"}
         </button>

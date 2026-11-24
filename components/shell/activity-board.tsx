@@ -23,7 +23,7 @@ import { activityRatio, activitySeries, activityState, canonicalActivityKey, cha
 import { pumpHub } from "@/lib/pump/client"
 import { LOCAL_ZONE, resolveZone, TIME_ZONES, type PairRecord } from "@/lib/types"
 import { formatAge } from "@/lib/market/format"
-import type { MonitorMode } from "@/components/lp/monitor-context"
+import { useLpMonitor, type MonitorMode } from "@/components/lp/monitor-context"
 import { ItemBoundary } from "@/components/shell/recover"
 
 const PAGE = 100
@@ -366,6 +366,7 @@ function ActivityBoardBody({ snapshot, mode, onClose }: { snapshot: SnapshotFile
   const [windowError, setWindowError] = useState<string | null>(null)
   const builtAt = useRef<string | null>(null)
   const status = activityStatus(mode)
+  const { caughtUpAt } = useLpMonitor()
   const missing = BOARD_COLUMNS.map((column) => column.id).filter((id) => !columns.includes(id))
   const needsWindow = columns.some((id) => id === "news" || id === "trends")
   const zone = resolveZone(zoneId)
@@ -431,7 +432,9 @@ function ActivityBoardBody({ snapshot, mode, onClose }: { snapshot: SnapshotFile
       eth1h: market.eth.data?.change1h ?? null,
       eth24h: market.eth.data?.change24h ?? null,
     })
-    const age = snapshot ? now - Date.parse(snapshot.generatedAt) : null
+    const published = snapshot ? Date.parse(snapshot.generatedAt) : NaN
+    const stamp = caughtUpAt != null && Number.isFinite(caughtUpAt) ? caughtUpAt : published
+    const age = Number.isFinite(stamp) ? now - stamp : null
     return {
       times,
       pairStats,
@@ -456,7 +459,7 @@ function ActivityBoardBody({ snapshot, mode, onClose }: { snapshot: SnapshotFile
     } catch {
       return null
     }
-  }, [snapshot, list, now, zone, market.gas.data, market.eth.data, baselines])
+  }, [snapshot, list, now, zone, market.gas.data, market.eth.data, baselines, caughtUpAt])
 
   function onColumns(next: BoardColumnId[]) {
     setColumns(next)
